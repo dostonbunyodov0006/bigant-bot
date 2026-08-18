@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Bigant.Api/Bigant.Api.csproj" />
+    <Project Path="src/Bigant.Didox/Bigant.Didox.csproj" />
+    <Project Path="src/Bigant.Domain/Bigant.Domain.csproj" />
+    <Project Path="src/Bigant.Infrastructure/Bigant.Infrastructure.csproj" />
+  </Folder>
+</Solution>
