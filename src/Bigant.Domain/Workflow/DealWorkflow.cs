@@ -200,7 +200,7 @@ public static class DealWorkflow
         StepType.Doverennost       => "Doverennost",
         StepType.Ttn               => "TTN",
         StepType.Esf               => "Schyot-faktura",
-        StepType.EsfAccepted       => "Qarshi tomon qabul qildi",
+        StepType.EsfAccepted       => "Faktura tasdig'i",
         _ => s.ToString()
     };
 
@@ -215,6 +215,51 @@ public static class DealWorkflow
         DocType.Reconciliation    => "Akt sverki",
         _ => d.ToString()
     };
+
+    /// <summary>
+    /// SHU QADAMNI KIM BAJARADI — biz yoki qarshi tomon.
+    /// Ogohlantirish matni shunga qarab o'zgaradi:
+    ///   biz  → «SIZ YUBORISHINGIZ KERAK»
+    ///   ular → «ULARDAN KELMADI»
+    /// Bularni aralashtirsak bugalter kimni kutayotganini bilmay qoladi.
+    /// </summary>
+    public static bool WeAct(DealKind kind, StepType step,
+                             bool? contractByUs = null, bool? ttnByUs = null) => step switch
+    {
+        // Doverennostni doim XARIDOR chiqaradi.
+        StepType.Doverennost => kind == DealKind.Purchase,
+
+        // Dogovor va TTN — bitim darajasida tanlanadi.
+        StepType.Contract => contractByUs ?? (kind == DealKind.Sale),
+        StepType.Ttn      => ttnByUs ?? (kind == DealKind.Sale),
+
+        // Pulni xaridor to'laydi.
+        StepType.Payment => kind == DealKind.Purchase,
+
+        // Fakturani sotuvchi chiqaradi, xaridor qabul qiladi.
+        StepType.InvoiceForPayment or StepType.Esf => kind == DealKind.Sale,
+        StepType.EsfAccepted                       => kind == DealKind.Purchase,
+
+        _ => kind == DealKind.Sale
+    };
+
+    /// <summary>Qadam kutilayotganda bugalter ko'radigan aniq matn.</summary>
+    public static string StepWaitingText(DealKind kind, StepType step,
+                                         bool? contractByUs = null, bool? ttnByUs = null)
+    {
+        var we = WeAct(kind, step, contractByUs, ttnByUs);
+        var label = StepLabel(step).ToUpperInvariant();
+
+        return step switch
+        {
+            StepType.Payment when we      => $"{label} — biz hali to'lamadik",
+            StepType.Payment              => $"{label} — pul hali tushmadi",
+            StepType.EsfAccepted when we  => $"{label} — biz hali qabul qilmadik",
+            StepType.EsfAccepted          => $"{label} — qarshi tomon hali qabul qilmadi",
+            _ when we                     => $"{label} — BIZ YUBORISHIMIZ KERAK, hali yuborilmadi",
+            _                             => $"{label} — ULARDAN HALI KELMADI"
+        };
+    }
 
     /// <summary>Zanjirdagi bitta uzilish.</summary>
     public sealed record ChainBreak(DocType Doc, string Problem);

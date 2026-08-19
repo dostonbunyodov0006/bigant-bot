@@ -81,19 +81,29 @@ public sealed class ReminderJob
                 }
             }
 
-            // ── 3. Muddati o'tgan cheklist qadamlari ──
+            // ── 3. Kutilayotgan qadamlar — HAR BIRIGA ALOHIDA OGOHLANTIRISH ──
+            // Egasining talabi: «davernist jonatilmadi», «shot faktura kelmadi» —
+            // har bir hujjat uchun o'z xabari bo'lsin va KIM harakat qilishi
+            // kerakligi aniq yozilsin.
             foreach (var s in d.Steps.Where(s => s.Status == StepStatus.Pending
                                               && s.DueDate is { } dd && dd < today))
             {
                 var late = today.DayNumber - s.DueDate!.Value.DayNumber;
+                var we = DealWorkflow.WeAct(d.Kind, s.Step, d.ContractByUs, d.TtnByUs);
+                var what = DealWorkflow.StepWaitingText(d.Kind, s.Step, d.ContractByUs, d.TtnByUs);
+                var icon = we ? "\U0001F4E4" : "\U0001F4E5";   // chiquvchi / kiruvchi quti
+
                 raised += await Raise(new Notification
                 {
                     Kind = NotificationKind.StepOverdue,
                     Severity = late > 7 ? NotificationSeverity.Critical : NotificationSeverity.Warning,
                     UserId = d.ManagerId,
                     DealId = d.Id,
-                    Title = $"{DealWorkflow.StepLabel(s.Step)} kechikdi — {d.Number}",
-                    Body = $"{who}: \"{DealWorkflow.StepLabel(s.Step)}\" qadami {late} kun kechikdi.",
+                    Title = $"{icon} {DealWorkflow.StepLabel(s.Step).ToUpperInvariant()} KUTILMOQDA",
+                    Body = $"Kontragent: {who}\n" +
+                           $"Shartnoma:  {d.Number}\n\n" +
+                           $"{what}\n" +
+                           $"Muddat {late} kun oldin o'tgan (belgilangan: {s.DueDate:dd.MM.yyyy}).",
                     DedupKey = $"StepOverdue:deal:{d.Id}:{s.Step}:{stamp}"
                 }, ct);
             }
@@ -195,13 +205,16 @@ public sealed class ReminderJob
                 DealId = deal.Id,
                 DocumentId = d.DocumentId,
                 Title = expired
-                    ? $"Doverennost muddati O'TDI — {deal.Number}"
-                    : $"Doverennost muddati tugayapti — {deal.Number}",
-                Body = expired
-                    ? $"{who}: {d.EmployeeName} nomidagi ishonchnoma {days} kun oldin tugagan " +
-                      $"({d.ValidUntil:dd.MM.yyyy}). Tovar hali olinmagan — yangi doverennost kerak."
-                    : $"{who}: {d.EmployeeName} nomidagi ishonchnoma {days} kundan keyin tugaydi " +
-                      $"({d.ValidUntil:dd.MM.yyyy}). Tovar hali olinmagan.",
+                    ? "⏰ DOVERENNOST MUDDATI O'TDI"
+                    : "⏳ DOVERENNOST MUDDATI TUGAYAPTI",
+                Body = $"Kontragent: {who}\n" +
+                       $"Shartnoma:  {deal.Number}\n" +
+                       $"Ishonchli shaxs: {d.EmployeeName}\n\n" +
+                       (expired
+                            ? $"Muddat {days} kun oldin tugagan ({d.ValidUntil:dd.MM.yyyy}).\n" +
+                              "Tovar hali olinmagan — YANGI DOVERENNOST KERAK."
+                            : $"Muddat tugashiga {days} kun qoldi ({d.ValidUntil:dd.MM.yyyy}).\n" +
+                              "Tovar hali olinmagan."),
                 DedupKey = $"DovExpiry:doc:{d.DocumentId}:{stamp}"
             }, ct);
         }

@@ -68,12 +68,15 @@ public sealed class DocumentService : IDocumentService
     private readonly IDidoxClient _didox;
     private readonly IDealService _deals;
     private readonly IAuditService _audit;
+    private readonly INotificationService _notify;
     private readonly ILogger<DocumentService> _log;
 
     public DocumentService(AppDbContext db, INumberGenerator numbers, IDidoxClient didox,
-                           IDealService deals, IAuditService audit, ILogger<DocumentService> log)
+                           IDealService deals, IAuditService audit,
+                           INotificationService notify, ILogger<DocumentService> log)
     {
-        _db = db; _numbers = numbers; _didox = didox; _deals = deals; _audit = audit; _log = log;
+        _db = db; _numbers = numbers; _didox = didox; _deals = deals;
+        _audit = audit; _notify = notify; _log = log;
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -183,7 +186,10 @@ public sealed class DocumentService : IDocumentService
         if (actor.Role is not (UserRole.Accountant or UserRole.Manager or UserRole.Admin))
             throw new BusinessException("FORBIDDEN", "Hujjatni faqat bugalter yoki rahbar imzolaydi");
 
-        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == documentId, ct)
+        // Doverennost muddati xabarda ko'rsatiladi — shuning uchun yuklaymiz.
+        var doc = await _db.Documents
+                      .Include(d => d.Doverennost)
+                      .FirstOrDefaultAsync(d => d.Id == documentId, ct)
                   ?? throw new BusinessException("NO_DOC", "Hujjat topilmadi");
 
         if (!doc.IsSignable)
@@ -214,6 +220,36 @@ public sealed class DocumentService : IDocumentService
                 step.CompletedAt = DateTimeOffset.UtcNow;
                 step.DocumentId = doc.Id;
             }
+        }
+
+        // ── «YUBORILDI» TASDIG'I ──
+        // Egasining talabi: doverennost yuborilganda ham xabar kelsin, faqat
+        // yuborilmaganda emas. Shunda bugalter ish bajarilganini ko'radi.
+        var dealInfo = doc.DealId is { } did
+            ? await _db.Deals.AsNoTracking()
+                .Where(d => d.Id == did)
+                .Select(d => new { d.Number, Cp = d.Counterparty!.Name, d.ManagerId })
+                .FirstOrDefaultAsync(ct)
+            : null;
+
+        if (dealInfo is not null)
+        {
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.IncomingDocument,
+                Severity = NotificationSeverity.Info,
+                UserId = dealInfo.ManagerId,
+                DealId = doc.DealId,
+                DocumentId = doc.Id,
+                Title = $"\U0001F4E4 {DealWorkflow.DocLabel(doc.DocType).ToUpperInvariant()} YUBORILDI",
+                Body = $"Kimga:   {dealInfo.Cp}\n" +
+                       $"Hujjat:  №{doc.DocNumber}\n" +
+                       (doc.Amount > 0 ? $"Summa:   {doc.Amount:N0} so'm\n" : "") +
+                       (doc.Doverennost?.ValidUntil is { } vu
+                            ? $"\n⏳ Amal qiladi: {vu:dd.MM.yyyy} gacha\n" : "") +
+                       $"\nShartnoma: {dealInfo.Number}",
+                DedupKey = $"Sent:doc:{doc.Id}"
+            }, ct);
         }
 
         _audit.Write(actor.Id, nameof(Document), doc.Id, "sign");
