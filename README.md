@@ -234,9 +234,73 @@ ASPNETCORE_ENVIRONMENT=Production
 - [ ] Hangfire paneli faqat Development'da ochiq (`Program.cs` da tekshirilgan) —
       Production'da ochmoqchi bo'lsangiz auth filtri qo'ying
 - [ ] `logs/` katalogi yozilishi mumkin bo'lsin; 30 kun saqlanadi
-- [ ] Xizmat qayta ishga tushganda avtomatik ko'tarilsin (systemd / Windows Service)
+- [ ] Xizmat qayta ishga tushganda avtomatik ko'tarilsin (quyida launchd namunasi)
 - [ ] Server vaqti muhim emas — kod Toshkent vaqtini `UzTime` orqali o'zi hisoblaydi,
       bazada UTC saqlanadi
+
+### macOS (Mac mini) — kunu tun ishlaydigan xizmat
+
+Loyiha macOS'da to'liq ishlaydi: Windows'ga xos API yo'q, fayl yo'llari `Path.Combine`
+bilan quriladi, vaqt mintaqasi `UzTime.Zone` orqali (`Asia/Tashkent` → topilmasa qat'iy UTC+5).
+
+```bash
+brew install --cask dotnet-sdk
+brew install postgresql@18 && brew services start postgresql@18
+createdb bigant
+
+git clone https://github.com/dostonbunyodov0006/bigant-bot.git ~/bigant
+cd ~/bigant && dotnet publish src/Bigant.Api -c Release -o ~/bigant/app
+```
+
+`~/Library/LaunchAgents/uz.bigant.bot.plist` — kirishda o'zi ishga tushadi,
+qulasa `KeepAlive` qayta ko'taradi:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>uz.bigant.bot</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/USERNAME/bigant/app/Bigant.Api</string>
+    <string>--urls</string><string>http://127.0.0.1:5080</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/USERNAME/bigant/app</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ASPNETCORE_ENVIRONMENT</key><string>Production</string>
+    <key>ConnectionStrings__Db</key><string>Host=localhost;Database=bigant;Username=...;Password=...</string>
+    <key>Jwt__Key</key><string>...</string>
+    <key>Telegram__BotToken</key><string>...</string>
+    <key>Didox__Enabled</key><string>true</string>
+    <key>Didox__PartnerToken</key><string>...</string>
+    <key>Didox__Login</key><string>...</string>
+    <key>Didox__Password</key><string>...</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/USERNAME/bigant/out.log</string>
+  <key>StandardErrorPath</key><string>/Users/USERNAME/bigant/err.log</string>
+</dict></plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/uz.bigant.bot.plist
+curl http://127.0.0.1:5080/health     # {"status":"ok","didox":true}
+```
+
+**Mac mini uchun qo'shimcha:**
+- **Uyquni o'chiring:** `sudo pmset -a sleep 0 disksleep 0` — aks holda uxlaganda
+  bot xabar qabul qilmaydi.
+- **Avtomatik qayta kirish:** System Settings → Users & Groups → Automatic login
+  (elektr uzilib qayta kelganda LaunchAgent ko'tarilishi uchun). Yoki LaunchAgent
+  o'rniga `/Library/LaunchDaemons` ishlating — u kirishsiz ham ishlaydi.
+- **Internet uzilsa:** Telegram va Didox so'rovlari xatoga tushadi, lekin xizmat
+  qulamaydi — 10 soniyadan keyin qayta uriniladi, `Outbox` navbati saqlanib turadi.
+- Tashqi dunyodan port ochish **shart emas** — xizmat faqat chiquvchi so'rov qiladi
+  (Telegram long polling + Didox). Shuning uchun `127.0.0.1` ga bog'lash yetarli
+  va bu eng xavfsiz variant.
 
 ### Xavfsizlik
 - Telegram tokeni URL ichida ketadi, shuning uchun `System.Net.Http.HttpClient`
@@ -271,8 +335,13 @@ Veb-interfeys yo'q, lekin endpointlar **test va integratsiya uchun** ishlaydi
 1. **Pul ma'lumoti Didox'dan kelmaydi.** Shartnoma summasi Didox'dan, to'langan
    summa faqat bugalter kiritganidan. Bugalter to'lovni yozishni unutsa, qarz
    haqiqiydan katta ko'rinadi. Ishonchliroq yo'l — bank vipiskasi importi.
-2. **`FacturaEmpowermentDoc` chiquvchi fakturamizda `null`.** Bizning bazamizda
-   zanjir bor, lekin Didox'da ko'rinmaydi. Rasmiy sxema kelganda to'ldiriladi.
+2. **Zanjir ikki manbadan quriladi.** Kiruvchi hujjatning xom JSON ida Didox'ning
+   o'z havolasi bo'lsa ( va o'xshashlari) —
+   aynan o'sha doverennostga bog'lanadi. Bo'lmasa — zanjirdagi tartib bo'yicha
+   taxmin qilinadi. Maydon nomlari  da
+    bilan belgilangan, rasmiy hujjatdan tasdiqlash kerak.
+   Noto'g'ri nom hech narsani buzmaydi — shunchaki taxminga qaytadi.
+   Chiquvchi fakturamizda  hali .
 3. **`DidoxHttpClient` — skelet.** Yuqoridagi 3 ta `TODO(didox)` to'ldirilmaguncha
    Didox bilan real aloqa yo'q.
 

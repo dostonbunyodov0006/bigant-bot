@@ -146,8 +146,12 @@ public sealed class ReminderJob
                 Severity = NotificationSeverity.Critical,
                 UserId = first.ManagerId,
                 DealId = first.DealId,
-                Title = $"Zanjir uzilgan — {first.Number}",
-                Body = $"{first.Who}:\n{text}\n\nTekshiring: /zanjir {first.Number}",
+                Title = "TEKSHIRING — hujjat zanjiri buzilgan",
+                Body = $"Kontragent: {first.Who}\n" +
+                       $"Shartnoma:  {first.Number}\n\n" +
+                       $"Muammo:\n{text}\n\n" +
+                       "Tovar ishonchnomasiz berilgan bo'lishi mumkin.\n" +
+                       $"Batafsil: /zanjir {first.Number}",
                 DedupKey = $"ChainBreak:deal:{first.DealId}:{breaks.Count}:{stamp}"
             }, ct);
         }

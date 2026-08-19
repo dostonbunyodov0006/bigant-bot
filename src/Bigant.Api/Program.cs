@@ -1,3 +1,4 @@
+using Bigant.Domain;
 using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
@@ -255,8 +256,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 var jobs = app.Services.GetRequiredService<IRecurringJobManager>();
-var uz = TimeZoneInfo.FindSystemTimeZoneById(
-    OperatingSystem.IsWindows() ? "West Asia Standard Time" : "Asia/Tashkent");
+// Vaqt mintaqasi UzTime dan olinadi — u Windows/macOS/Linux uchun fallback bilan
+// himoyalangan. To'g'ridan-to'g'ri FindSystemTimeZoneById chaqirilsa nomi
+// topilmagan tizimda ilova UMUMAN ISHGA TUSHMAYDI.
+var uz = UzTime.Zone;
 
 jobs.AddOrUpdate<ReminderJob>("eslatmalar", j => j.RunAsync(CancellationToken.None), "*/30 * * * *");
 jobs.AddOrUpdate<DigestJob>("kunlik-xulosa", j => j.RunAsync(CancellationToken.None), "0 9 * * *",

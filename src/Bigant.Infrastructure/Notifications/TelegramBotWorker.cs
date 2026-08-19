@@ -244,9 +244,12 @@ public sealed partial class TelegramBotWorker : BackgroundService
     //  TO'LOV
     // ══════════════════════════════════════════════════════════════
 
-    /// <summary>Matnda summa ham, «to'landi» so'zi ham bo'lsa — to'lov.</summary>
-    private static bool LooksLikePayment(string text) =>
-        AmountRegex().IsMatch(text) && PaidWordRegex().IsMatch(text);
+    /// <summary>
+    /// Matnda SUMMA bo'lsa — to'lov bo'lishi mumkin.
+    /// «to'landi» so'zi SHART EMAS: bugalter «5 mln Uniform» deb ham yozadi.
+    /// Kontragent topilsa to'lov deb qabul qilinadi, topilmasa xushmuomala javob.
+    /// </summary>
+    private static bool LooksLikePayment(string text) => AmountRegex().IsMatch(text);
 
     private async Task HandlePaymentAsync(AppDbContext db, TelegramChannel tg, string chatId,
                                           string? arg, CancellationToken ct)
@@ -275,13 +278,16 @@ public sealed partial class TelegramBotWorker : BackgroundService
             return;
         }
 
-        var matches = await db.Counterparties.AsNoTracking()
-            .Where(c => EF.Functions.ILike(c.Name, $"%{name}%"))
-            .Take(5).ToListAsync(ct);
+        var matches = await FindCounterpartiesAsync(db, name, ct);
 
         if (matches.Count == 0)
         {
-            await tg.SendPlainAsync(chatId, $"«{Esc(name)}» topilmadi. Nomini boshqacha yozib ko'ring.", ct);
+            await tg.SendPlainAsync(chatId,
+                $"«{Esc(name)}» topilmadi.\n\n" +
+                "Kontragent nomini yozing — istalgan tartibda bo'ladi:\n" +
+                "<code>5 mln Uniform</code>\n" +
+                "<code>Uniform 5 mln</code>\n" +
+                "<code>5 mln Uniform MChJ bizga otkazdi</code>", ct);
             return;
         }
         if (matches.Count > 1)
@@ -374,20 +380,23 @@ public sealed partial class TelegramBotWorker : BackgroundService
 
         // Yo'nalishga qarab so'zlar o'zgaradi — bugalter nimani yozganini
         // ko'rib, xato kiritgan bo'lsa darhol sezsin.
+        // Raqamlar <pre> ichida — ustma-ust turadi, o'qish oson.
         var reply =
             (weReceived
-                ? $"\U0001F4B0 <b>{Esc(cp.Name)}</b> bizga {sum:N0} so'm o'tkazdi\n\n"
-                : $"\U0001F4B8 <b>{Esc(cp.Name)}</b> ga {sum:N0} so'm o'tkazdik\n\n") +
-            $"Shartnoma: <code>{Esc(deal.Number)}</code>\n" +
-            $"Summa:      {deal.AmountTotal:N0}\n" +
+                ? $"\U0001F4B0 <b>QABUL QILINDI</b>\n<i>{Esc(cp.Name)} bizga {sum:N0} so'm o'tkazdi</i>\n\n"
+                : $"\U0001F4B8 <b>QABUL QILINDI</b>\n<i>{Esc(cp.Name)} ga {sum:N0} so'm o'tkazdik</i>\n\n") +
+            $"Shartnoma <code>{Esc(deal.Number)}</code>\n" +
+            "<pre>" +
+            $"Summa      {deal.AmountTotal,15:N0}\n" +
             (weReceived
-                ? $"O'tkazishdi: {deal.AmountPaid:N0}\n"
-                : $"O'tkazdik:   {deal.AmountPaid:N0}\n") +
+                ? $"Tushdi     {deal.AmountPaid,15:N0}\n"
+                : $"O'tkazdik  {deal.AmountPaid,15:N0}\n") +
+            "</pre>" +
             (isFull
-                ? "✅ <b>Qarz yopildi.</b>"
+                ? "✅ <b>QARZ YO'Q</b>"
                 : weReceived
-                    ? $"\U0001F7E2 <b>Qoldi olish: {debt:N0} so'm</b>"
-                    : $"\U0001F534 <b>Qoldi to'lash: {debt:N0} so'm</b>");
+                    ? $"\U0001F7E2 <b>QOLDI OLISH: {debt:N0} so'm</b>"
+                    : $"\U0001F534 <b>QOLDI TO'LASH: {debt:N0} so'm</b>");
 
         await tg.SendWithMenuAsync(chatId, reply, ct);
         _log.LogInformation("Telegram orqali to'lov: {Cp} {Sum}", cp.Name, sum);
@@ -500,8 +509,8 @@ public sealed partial class TelegramBotWorker : BackgroundService
 
         var buy = kind == DealKind.Purchase;
         var head = buy
-            ? "\U0001F534 <b>QARZIMIZ</b> — biz postavshiklarga"
-            : "\U0001F7E2 <b>QARZDORLAR</b> — klientlar bizga";
+            ? "\U0001F534 <b>QARZIMIZ</b>\n<i>biz postavshiklarga qancha to'lashimiz kerak</i>"
+            : "\U0001F7E2 <b>QARZDORLAR</b>\n<i>klientlar bizga qancha to'lashi kerak</i>";
 
         if (rows.Count == 0)
             return head + "\n\n✅ Qarz yo'q.";
@@ -512,19 +521,20 @@ public sealed partial class TelegramBotWorker : BackgroundService
         foreach (var g in rows.GroupBy(r => r.Name)
                               .OrderByDescending(g => g.Sum(x => x.Debt)))
         {
-            sb.Append($"\n<b>{Esc(g.Key)}</b>\n");
+            sb.Append($"\n━━━━━━━━━━━━━━━━━━\n<b>{Esc(g.Key)}</b>\n");
             foreach (var r in g.OrderByDescending(x => x.Debt))
             {
                 var late = r.DueDate is { } dd && dd < today
                     ? $"  ⏰ {today.DayNumber - dd.DayNumber} kun kechikdi" : "";
-                sb.Append($"   <code>{Esc(r.Number)}</code>{late}\n");
-                sb.Append($"      Shartnoma:  {r.AmountTotal:N0}\n");
-                sb.Append(buy
-                    ? $"      O'tkazdik:  {r.AmountPaid:N0}\n"
-                    : $"      O'tkazishdi: {r.AmountPaid:N0}\n");
-                sb.Append(buy
-                    ? $"      <b>Qoldi to'lash: {r.Debt:N0}</b>\n"
-                    : $"      <b>Qoldi olish:   {r.Debt:N0}</b>\n");
+                sb.Append($"<code>{Esc(r.Number)}</code>{late}\n");
+                // <pre> — raqamlar ustma-ust, bir qarashda solishtiriladi.
+                sb.Append("<pre>");
+                sb.Append($"Shartnoma  {r.AmountTotal,15:N0}\n");
+                sb.Append(buy ? $"O'tkazdik  {r.AmountPaid,15:N0}\n"
+                              : $"Tushdi     {r.AmountPaid,15:N0}\n");
+                sb.Append(buy ? $"QOLDI      {r.Debt,15:N0}\n"
+                              : $"QOLDI      {r.Debt,15:N0}\n");
+                sb.Append("</pre>");
             }
         }
 
@@ -560,14 +570,66 @@ public sealed partial class TelegramBotWorker : BackgroundService
         s = PaidWordRegex().Replace(s, " ");
         s = NoiseRegex().Replace(s, " ");
         s = s.Trim(' ', '"', '«', '»', ',', '.', '-');
+        return TrimSuffix(s).Trim();
+    }
 
-        // «Uzpolimerga» → «Uzpolimer»: o'zbekcha jo'nalish qo'shimchasi.
-        if (s.Length > 4 && (s.EndsWith("ga", StringComparison.OrdinalIgnoreCase)
-                          || s.EndsWith("ka", StringComparison.OrdinalIgnoreCase)
-                          || s.EndsWith("qa", StringComparison.OrdinalIgnoreCase)))
-            s = s[..^2];
+    /// <summary>«Uzpolimerga» → «Uzpolimer»: o'zbekcha kelishik qo'shimchalari.</summary>
+    private static string TrimSuffix(string s)
+    {
+        foreach (var suf in new[] { "ning", "dan", "ga", "ka", "qa", "da", "ni" })
+            if (s.Length > suf.Length + 2 && s.EndsWith(suf, StringComparison.OrdinalIgnoreCase))
+                return s[..^suf.Length];
+        return s;
+    }
 
-        return s.Trim();
+    /// <summary>
+    /// Kontragentni TOPISHGA HARAKAT QILADI — bugalter qanday yozsa ham.
+    /// Bugalter «5 mln Uniform», «Uniform MChJ 5 mln», «5mln uniformga»,
+    /// «Uniform 5 000 000 tolandi» — hammasini bir xil tushunishi kerak.
+    ///
+    /// Uch bosqich, birinchi natija bergani g'olib:
+    ///   1) butun qoldiq matn bo'yicha
+    ///   2) har bir so'z bo'yicha alohida (kelishik qo'shimchasi kesilgan holda)
+    ///   3) nom so'zlarining bosh qismi bo'yicha (ILIKE prefiks)
+    /// </summary>
+    private static async Task<List<Counterparty>> FindCounterpartiesAsync(
+        AppDbContext db, string raw, CancellationToken ct)
+    {
+        var found = new Dictionary<long, Counterparty>();
+
+        async Task TryAsync(string needle)
+        {
+            if (found.Count > 0) return;                 // birinchi bosqich yetdi
+            if (needle.Length < 3) return;
+            var rows = await db.Counterparties.AsNoTracking()
+                .Where(c => EF.Functions.ILike(c.Name, $"%{needle}%"))
+                .Take(5).ToListAsync(ct);
+            foreach (var r in rows) found.TryAdd(r.Id, r);
+        }
+
+        await TryAsync(raw);
+
+        // Har bir so'z bo'yicha — «Uniform MChJ» dan «Uniform» ni topadi.
+        if (found.Count == 0)
+        {
+            var words = raw.Split([' ', '\t', ',', '.', '"', '«', '»'],
+                                  StringSplitOptions.RemoveEmptyEntries)
+                           .Select(TrimSuffix)
+                           .Where(w => w.Length >= 3)
+                           .OrderByDescending(w => w.Length)
+                           .ToList();
+
+            foreach (var w in words)
+            {
+                var rows = await db.Counterparties.AsNoTracking()
+                    .Where(c => EF.Functions.ILike(c.Name, $"%{w}%"))
+                    .Take(5).ToListAsync(ct);
+                foreach (var r in rows) found.TryAdd(r.Id, r);
+                if (found.Count > 0) break;              // eng uzun so'z g'olib
+            }
+        }
+
+        return [.. found.Values];
     }
 
     [GeneratedRegex(@"(?<num>\d[\d\s.,]*)\s*(?<unit>mln\.?|million|mlrd|milliard|ming|tys|so'?m|sum)?",

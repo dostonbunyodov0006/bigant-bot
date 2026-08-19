@@ -1,3 +1,4 @@
+using Bigant.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Json;
@@ -53,7 +54,8 @@ public sealed class TelegramChannel : INotificationChannel
     private readonly TelegramOptions _opt;
     private readonly ILogger<TelegramChannel> _log;
 
-    private static readonly TimeZoneInfo Uz = ResolveTz();
+    // Yagona manba — UzTime. Aks holda ikki joyda ikki xil mintaqa bo'lib qolardi.
+    private static readonly TimeZoneInfo Uz = UzTime.Zone;
 
     private readonly IServiceScopeFactory _scopes;
     private string? _companyChat;
@@ -217,13 +219,4 @@ public sealed class TelegramChannel : INotificationChannel
     private static string Escape(string s) =>
         s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
 
-    private static TimeZoneInfo ResolveTz()
-    {
-        foreach (var id in new[] { "Asia/Tashkent", "West Asia Standard Time" })
-        {
-            try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-            catch (TimeZoneNotFoundException) { }
-        }
-        return TimeZoneInfo.Utc;
-    }
 }

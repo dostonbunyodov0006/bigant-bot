@@ -76,8 +76,8 @@ public sealed class InboxService : IInboxService
             Amount = inc.Amount,
             VatAmount = inc.VatAmount,
             DidoxId = inc.DidoxId,
-            ParentDocumentId = DealWorkflow.ResolveParent(
-                inc.DocType, priorChain),
+            // Zanjir: avval Didox'ning O'Z havolasi, bo'lmasa tartib bo'yicha taxmin.
+            ParentDocumentId = await ResolveParentAsync(inc, deal.Id, priorChain, ct),
             Payload = SafeParse(inc.RawJson)
         };
         _db.Documents.Add(doc);
@@ -126,7 +126,7 @@ public sealed class InboxService : IInboxService
             UserId = deal.ManagerId,
             DealId = deal.Id,
             DocumentId = doc.Id,
-            Title = $"{who}dan {label} keldi",
+            Title = $"{label} keldi",
             Body = body,
             DedupKey = $"Incoming:doc:{doc.Id}"
         }, ct);
@@ -137,6 +137,84 @@ public sealed class InboxService : IInboxService
 
         _log.LogInformation("Kiruvchi hujjat ro'yxatga olindi: {Type} №{Number}", inc.DocType, inc.DocNumber);
         return doc;
+    }
+
+    /// <summary>
+    /// Kelgan hujjat qaysi hujjat ASOSIDA chiqarilgan.
+    ///
+    /// IKKI MANBA, birinchisi ishonchliroq:
+    ///   1. DIDOX'NING O'Z HAVOLASI — fakturada `FacturaEmpowermentDoc`,
+    ///      TTN'da shunga o'xshash blok bo'ladi. Yuboruvchi to'ldirgan bo'lsa,
+    ///      bu ANIQ ma'lumot: aynan qaysi doverennost uchun ekani yozib qo'yilgan.
+    ///   2. TARTIB BO'YICHA TAXMIN — zanjirdagi oldingi hujjat. Didox havolasi
+    ///      bo'lmasa shu ishlatiladi. Oddiy oqimda to'g'ri, lekin bitta kontragent
+    ///      bilan bir vaqtda ikkita yetkazib berish ketsa adashishi mumkin.
+    /// </summary>
+    private async Task<long?> ResolveParentAsync(
+        IncomingDocument inc, long dealId,
+        IReadOnlyList<(DocType DocType, long Id)> prior, CancellationToken ct)
+    {
+        // 1) Didox havolasi bo'yicha
+        if (ExtractEmpowermentNumber(inc.RawJson) is { } dovNo)
+        {
+            var byRef = await _db.Documents.AsNoTracking()
+                .Where(d => d.DealId == dealId
+                         && d.DocType == DocType.Doverennost
+                         && d.DocNumber == dovNo)
+                .Select(d => (long?)d.Id)
+                .FirstOrDefaultAsync(ct);
+
+            if (byRef is not null)
+            {
+                _log.LogInformation(
+                    "Zanjir Didox havolasidan olindi: {Doc} → doverennost №{No}",
+                    inc.DocNumber, dovNo);
+                return byRef;
+            }
+
+            _log.LogWarning(
+                "Didox {Doc} hujjatida doverennost №{No} ko'rsatilgan, lekin bizda topilmadi",
+                inc.DocNumber, dovNo);
+        }
+
+        // 2) Tartib bo'yicha
+        return DealWorkflow.ResolveParent(inc.DocType, prior);
+    }
+
+    /// <summary>
+    /// Didox javobidan doverennost raqamini ajratib oladi.
+    ///
+    /// TODO(didox): maydon nomlari RASMIY HUJJATDAN tasdiqlanishi kerak.
+    /// Hozir ehtimoliy nomlar bo'yicha qidiriladi; topilmasa `null` qaytadi va
+    /// zanjir tartib bo'yicha quriladi — ya'ni noto'g'ri nom hech narsani buzmaydi.
+    /// </summary>
+    private static string? ExtractEmpowermentNumber(string rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson) || rawJson == "{}") return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+
+            // Ehtimoliy joylar: FacturaEmpowermentDoc.EmpowermentNo, EmpowermentDoc.No, ...
+            string[] blocks = ["FacturaEmpowermentDoc", "EmpowermentDoc", "Empowerment"];
+            string[] fields = ["EmpowermentNo", "No", "Number", "DocNo"];
+
+            foreach (var b in blocks)
+            {
+                if (!doc.RootElement.TryGetProperty(b, out var block)) continue;
+                if (block.ValueKind != JsonValueKind.Object) continue;
+
+                foreach (var f in fields)
+                    if (block.TryGetProperty(f, out var v) &&
+                        v.ValueKind == JsonValueKind.String &&
+                        !string.IsNullOrWhiteSpace(v.GetString()))
+                        return v.GetString();
+            }
+        }
+        catch (JsonException) { }
+
+        return null;
     }
 
     /// <summary>
@@ -169,7 +247,7 @@ public sealed class InboxService : IInboxService
                     .Where(d => d.Id == dovId)
                     .Select(d => d.DocNumber)
                     .FirstOrDefaultAsync(ct);
-                dovLine = $"Doverennost: №{no ?? "—"}";
+                dovLine = $"✅ Doverennost №{no ?? "—"} uchun";
             }
             else
             {
@@ -178,10 +256,13 @@ public sealed class InboxService : IInboxService
             }
         }
 
-        var body = $"{who} — №{inc.DocNumber ?? "—"}";
-        if (inc.Amount > 0) body += $", {inc.Amount:N0} so'm";
-        if (basis is not null) body += $"\nAsos: {basis}";
-        if (dovLine is not null) body += $"\n{dovLine}";
+        // Ko'rinish: kim → nima → qancha → qaysi asosda → qaysi shartnomada.
+        // Har biri alohida qatorda, bir qarashda o'qiladi.
+        var body = $"Kimdan:  {who}\n";
+        body += $"Hujjat:  №{inc.DocNumber ?? "—"}\n";
+        if (inc.Amount > 0) body += $"Summa:   {inc.Amount:N0} so'm\n";
+        if (dovLine is not null) body += $"\n{dovLine}\n";
+        else if (basis is not null) body += $"\n✅ {basis} asosida\n";
         return body + $"\nShartnoma: {deal.Number}";
     }
 

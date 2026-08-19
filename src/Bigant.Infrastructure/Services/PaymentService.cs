@@ -153,6 +153,7 @@ public sealed partial class PaymentService : IPaymentService
         var deal = await _db.Deals
             .Include(d => d.Steps)
             .Include(d => d.Payments)
+            .Include(d => d.Counterparty)
             .FirstAsync(d => d.Id == dealId, ct);
 
         deal.AmountPaid = deal.Payments.Sum(p => p.Amount);
@@ -170,18 +171,33 @@ public sealed partial class PaymentService : IPaymentService
         }
         await _db.SaveChangesAsync(ct);
 
-        var who = deal.Kind == DealKind.Purchase ? "Biz to'ladik" : "Bizga tushdi";
+        var buy = deal.Kind == DealKind.Purchase;
+        var cpName = deal.Counterparty?.Name ?? "—";
+
+        // Bir qarashda o'qiladigan ko'rinish: kim, qancha edi, qancha berildi,
+        // qancha qoldi. Raqamlar ustma-ust turadi.
+        var body =
+            $"Kontragent: {cpName}\n\n" +
+            $"Shartnoma:  {deal.AmountTotal:N0}\n" +
+            (buy ? $"O'tkazdik:  {deal.AmountPaid:N0}\n"
+                 : $"Tushdi:     {deal.AmountPaid:N0}\n") +
+            "──────────────────\n" +
+            (isFull
+                ? "✅ QARZ YO'Q"
+                : buy ? $"🔴 QOLDI TO'LASH: {debt:N0}"
+                      : $"🟢 QOLDI OLISH:  {debt:N0}");
+
         await _notify.RaiseAsync(new Notification
         {
             Kind = NotificationKind.Payment,
             Severity = isFull ? NotificationSeverity.Info : NotificationSeverity.Warning,
             UserId = deal.ManagerId,
             DealId = deal.Id,
-            Title = isFull ? $"{deal.Number} — to'liq to'landi" : $"{deal.Number} — qisman to'lov",
-            Body = isFull
-                ? $"{who}: {deal.AmountPaid:N0} so'm. Qarz yo'q."
-                : $"{who}: {deal.AmountPaid:N0} / {deal.AmountTotal:N0} so'm."
-                  + $"\nQolgan qarz: {debt:N0} so'm.",
+            Title = isFull
+                ? $"To'liq to'landi — {deal.Number}"
+                : buy ? $"To'lov o'tkazildi — {deal.Number}"
+                      : $"To'lov tushdi — {deal.Number}",
+            Body = body,
             DedupKey = $"Pay:{deal.Id}:{deal.AmountPaid}"
         }, ct);
 

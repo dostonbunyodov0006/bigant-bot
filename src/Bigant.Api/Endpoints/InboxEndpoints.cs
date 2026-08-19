@@ -27,7 +27,9 @@ public static class InboxEndpoints
         string? SenderName,
         decimal Amount,
         decimal VatAmount,
-        long? DealId);
+        long? DealId,
+        /// <summary>Didox javobining xom JSON i. Zanjir havolasi shundan o'qiladi.</summary>
+        string? RawJson = null);
 
     public static void MapInboxEndpoints(this WebApplication app)
     {
@@ -63,7 +65,7 @@ public static class InboxEndpoints
                 req.SenderName,
                 req.Amount,
                 req.VatAmount,
-                RawJson: "{}"), ct);
+                RawJson: req.RawJson ?? "{}"), ct);
 
             if (doc is null)
                 return Results.Ok(new { skipped = true, message = "Bu hujjat allaqachon ro'yxatda" });
