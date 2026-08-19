@@ -1,4 +1,7 @@
 using Bigant.Api.Auth;
+using Bigant.Didox;
+using Bigant.Infrastructure.Notifications;
+using Microsoft.Extensions.Options;
 using Bigant.Domain.Entities;
 using Bigant.Domain.Enums;
 using Bigant.Infrastructure;
@@ -27,7 +30,7 @@ public static class DirectoryEndpoints
     public static void MapDirectoryEndpoints(this WebApplication app)
     {
         // ══════════ BIGANT REKVIZITLARI ══════════
-        var co = app.MapGroup("/api/company").WithTags("Sozlamalar").RequireAuthorization();
+        var co = app.MapGroup("/api/company").WithTags("Sozlamalar").RequireAuthorization().RequireRateLimiting("api");
 
         co.MapGet("", async (AppDbContext db, CancellationToken ct) =>
         {
@@ -85,7 +88,7 @@ public static class DirectoryEndpoints
         });
 
         // ══════════ XODIMLAR (doverennost / haydovchi) ══════════
-        var em = app.MapGroup("/api/employees").WithTags("Ma'lumotnoma").RequireAuthorization();
+        var em = app.MapGroup("/api/employees").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api");
 
         em.MapGet("", async (bool? driversOnly, AppDbContext db, CancellationToken ct) =>
         {
@@ -104,6 +107,11 @@ public static class DirectoryEndpoints
 
         em.MapPost("", async (UpsertEmployee req, CurrentUser cu, AppDbContext db, CancellationToken ct) =>
         {
+            // Ma'lumotnomani faqat ADMIN o'zgartiradi — buxgalterlar ko'radi, tegmaydi.
+            var actor = await cu.GetAsync(ct);
+            if (actor.Role != UserRole.Admin)
+                throw new BusinessException("FORBIDDEN", "Bu bo'limni faqat administrator o'zgartiradi");
+
             if (!string.IsNullOrWhiteSpace(req.Pinfl) && req.Pinfl.Length != 14)
                 throw new BusinessException("BAD_PINFL", "PINFL 14 ta raqamdan iborat bo'lishi kerak");
 
@@ -123,7 +131,7 @@ public static class DirectoryEndpoints
         });
 
         // ══════════ AVTOMOBILLAR (TTN) ══════════
-        var ve = app.MapGroup("/api/vehicles").WithTags("Ma'lumotnoma").RequireAuthorization();
+        var ve = app.MapGroup("/api/vehicles").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api");
 
         ve.MapGet("", async (AppDbContext db, CancellationToken ct) =>
             Results.Ok(await db.Vehicles.AsNoTracking().Where(v => v.IsActive)
@@ -134,6 +142,11 @@ public static class DirectoryEndpoints
 
         ve.MapPost("", async (UpsertVehicle req, CurrentUser cu, AppDbContext db, CancellationToken ct) =>
         {
+            // Ma'lumotnomani faqat ADMIN o'zgartiradi — buxgalterlar ko'radi, tegmaydi.
+            var actor = await cu.GetAsync(ct);
+            if (actor.Role != UserRole.Admin)
+                throw new BusinessException("FORBIDDEN", "Bu bo'limni faqat administrator o'zgartiradi");
+
             var v = req.Id is { } id
                 ? await db.Vehicles.FirstOrDefaultAsync(x => x.Id == id, ct)
                   ?? throw new BusinessException("NOT_FOUND", "Avtomobil topilmadi")
@@ -149,7 +162,7 @@ public static class DirectoryEndpoints
         });
 
         // ══════════ SHARTNOMA SHABLONLARI (Didox Parts[]) ══════════
-        var tp = app.MapGroup("/api/contract-templates").WithTags("Ma'lumotnoma").RequireAuthorization();
+        var tp = app.MapGroup("/api/contract-templates").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api");
 
         tp.MapGet("", async (AppDbContext db, CancellationToken ct) =>
             Results.Ok(await db.ContractTemplates.AsNoTracking()
@@ -164,6 +177,11 @@ public static class DirectoryEndpoints
 
         tp.MapPost("", async (UpsertTemplate req, CurrentUser cu, AppDbContext db, CancellationToken ct) =>
         {
+            // Ma'lumotnomani faqat ADMIN o'zgartiradi — buxgalterlar ko'radi, tegmaydi.
+            var actor = await cu.GetAsync(ct);
+            if (actor.Role != UserRole.Admin)
+                throw new BusinessException("FORBIDDEN", "Bu bo'limni faqat administrator o'zgartiradi");
+
             if (req.Parts is null or { Count: 0 })
                 throw new BusinessException("NO_PARTS",
                     "Shablonda kamida bitta bo'lim bo'lishi kerak — Didox bo'limsiz dogovorni qabul qilmaydi");
@@ -192,45 +210,65 @@ public static class DirectoryEndpoints
             return Results.Ok(new { t.Id, parts = t.Parts.Count });
         });
 
-        // ══════════ DIDOX TAYYORLIK TEKSHIRUVI ══════════
-        // Bitta ekranda: nima yetishmayapti va nimadan boshlash kerak.
-        app.MapGet("/api/didox-readiness", async (AppDbContext db, CancellationToken ct) =>
+        // ══════════════════════════════════════════════════════════
+        //  DIDOX'NI YOQISHDAN OLDIN
+        //
+        //  Faqat HAQIQATAN to'suvchi narsalar. Ilgari bu yerda direktor
+        //  PINFL, hisob raqami, ishonchli shaxs, haydovchi va shartnoma
+        //  shabloni ham tekshirilardi — ular BIZ hujjat yaratgan davrdan
+        //  qolgan edi. Endi hujjatni Didox yaratadi, bu ma'lumotlar Didox
+        //  tomonida turadi va bizda hech qayerda o'qilmaydi. Ularni talab
+        //  qilish 93 kontragentdan 89 tasini «nosoz» deb ko'rsatib,
+        //  bugalterga ma'nosiz ogohlantirish berardi.
+        //
+        //  XAVFSIZLIK: RequireAuthorization tushib qolgan edi — tokensiz ham
+        //  200 qaytarardi (2026-08-19 auditda topilgan).
+        // ══════════════════════════════════════════════════════════
+        app.MapGet("/api/didox-readiness", async (AppDbContext db, IOptions<DidoxOptions> didox,
+                                                  IOptions<TelegramOptions> tg, CancellationToken ct) =>
         {
             var company = await db.CompanyProfiles.AsNoTracking().FirstOrDefaultAsync(ct);
+            var d = didox.Value;
 
+            // Kontragentni TANIB OLISH uchun INN kerak. Busiz keyingi hujjat
+            // shu kontragentga bog'lanmaydi va qarz ikkiga bo'linib ketadi.
+            var noInn = await db.Counterparties.AsNoTracking()
+                .Where(c => !c.IsBlocked && c.Inn == null && c.Pinfl == null)
+                .Select(c => new { c.Id, c.Name })
+                .Take(10)
+                .ToListAsync(ct);
 
-
-            var counterparties = await db.Counterparties.AsNoTracking()
-                .Where(c => !c.IsBlocked).ToListAsync(ct);
-            var badCp = counterparties
-                .Select(c => new { c.Id, c.Name, Missing = c.MissingForDidox().ToList() })
-                .Where(x => x.Missing.Count > 0)
-                .ToList();
-
-            var employees = await db.Employees.AsNoTracking().Where(e => e.IsActive).ToListAsync(ct);
+            var cpTotal = await db.Counterparties.AsNoTracking().CountAsync(c => !c.IsBlocked, ct);
 
             return Results.Ok(new
             {
                 company = new
                 {
                     exists = company is not null,
-                    ready = company is not null && company.MissingForDidox().Count() == 0,
-                    missing = company?.MissingForDidox().ToList() ?? ["Rekvizitlar kiritilmagan"],
+                    // Didox uchun bizdan yagona zarur narsa — O'Z INN imiz:
+                    // hujjat bizga kelganmi yoki biz yuborganmizmi, shu bilan aniqlanadi.
+                    inn = company?.Tin,
+                    ready = !string.IsNullOrWhiteSpace(company?.Tin),
+                },
+                didox = new
+                {
+                    enabled = d.Enabled,
+                    baseUrl = d.BaseUrl,
+                    hasToken = !string.IsNullOrWhiteSpace(d.PartnerToken),
+                    hasLogin = !string.IsNullOrWhiteSpace(d.Login) && !string.IsNullOrWhiteSpace(d.Password),
+                },
+                telegram = new
+                {
+                    enabled = tg.Value.Enabled,
+                    connected = !string.IsNullOrWhiteSpace(company?.TelegramChatId),
                 },
                 counterparties = new
                 {
-                    total = counterparties.Count,
-                    notReady = badCp.Count,
-                    sample = badCp.Take(10),
+                    total = cpTotal,
+                    noInn = noInn.Count,
+                    sample = noInn,
                 },
-                employees = new
-                {
-                    total = employees.Count,
-                    canReceiveGoods = employees.Count(e => e.CanReceiveGoods),
-                    drivers = employees.Count(e => e.IsDriver),
-                },
-                contractTemplates = await db.ContractTemplates.CountAsync(ct),
             });
-        });
+        }).RequireAuthorization();
     }
 }

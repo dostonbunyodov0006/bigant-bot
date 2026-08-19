@@ -48,11 +48,20 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (t) headers['Authorization'] = `Bearer ${t}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  // ── ALOQA ──
+  // Server o'chiq yoki internet uzilgan bo'lsa `fetch` xato tashlaydi.
+  // Ilgari bu holat ushlanmasdi va ekranga tushunarsiz yozuv chiqardi.
+  let res: Response
+  try {
+    res = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    throw new ApiError('OFFLINE',
+      'Server bilan aloqa yo\'q. Internetni tekshiring yoki bir ozdan keyin urining.', 0)
+  }
 
   if (res.status === 401) {
     token.clear()
@@ -65,18 +74,33 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   const text = await res.text()
-  const data = text ? JSON.parse(text) : null
+
+  // Server HTML yoki bo'sh javob qaytarsa JSON.parse yiqilardi va
+  // foydalanuvchi «Unexpected token» degan yozuvni ko'rardi.
+  let data: { code?: string; message?: string } | null = null
+  try { data = text ? JSON.parse(text) : null } catch { data = null }
 
   if (!res.ok) {
     // Backend {code, message} qaytaradi — o'sha matnni ko'rsatamiz.
-    throw new ApiError(
-      data?.code ?? 'ERROR',
-      data?.message ?? `Xato ${res.status}`,
-      res.status,
-    )
+    // Matn bo'lmasa RAQAM emas, tushunarli gap chiqadi: bugalter uchun
+    // «500» hech narsa anglatmaydi, «serverda xato» anglatadi.
+    throw new ApiError(data?.code ?? 'ERROR', data?.message ?? humanError(res.status), res.status)
   }
 
   return data as T
+}
+
+/**
+ * Xato raqamini odam tiliga o'giradi.
+ * Ekranda hech qachon «Xato 500» ko'rinmasligi kerak.
+ */
+function humanError(status: number): string {
+  if (status >= 500) return 'Serverda xato yuz berdi. Bir ozdan keyin qayta urining.'
+  if (status === 403) return 'Bu bo\'lim sizning ishingizga kirmaydi.'
+  if (status === 404) return 'So\'ralgan ma\'lumot topilmadi.'
+  if (status === 423) return 'Hisob vaqtincha bloklangan.'
+  if (status >= 400) return 'So\'rov to\'g\'ri emas — ma\'lumotni tekshiring.'
+  return 'Kutilmagan xato yuz berdi.'
 }
 
 export const api = {
@@ -119,18 +143,6 @@ export interface DealStep {
   note: string | null
 }
 
-export interface DealItem {
-  id: number
-  product: string
-  qty: number
-  unit: string | null
-  price: number
-  amount: number
-  vatRate: number
-  vatAmount: number
-  mxik: string | null
-}
-
 export interface DealDoc {
   id: number
   type: DocType
@@ -165,7 +177,6 @@ export interface DealCard {
   closedAt: string | null
   comment: string | null
   steps: DealStep[]
-  items: DealItem[]
   documents: DealDoc[]
   payments: { id: number; amount: number; payDate: string; bankDocNo: string | null; purpose: string | null }[]
 }
@@ -245,6 +256,8 @@ export interface Notif {
   documentId: number | null
   isRead: boolean
   createdAt: string
+  /** Qaysi rol uchun. null — ikkala buxgalterga ham tegishli. */
+  targetRole?: 'Realizatsiya' | 'Perehod' | 'Admin' | null
 }
 
 export interface Counterparty {
@@ -271,11 +284,10 @@ export interface Product {
 }
 
 export interface Readiness {
-  company: { exists: boolean; ready: boolean; missing: string[] }
-  products: { total: number; notReady: number; sample: { id: number; name: string; problem: string | null }[] }
-  counterparties: { total: number; notReady: number; sample: { id: number; name: string; missing: string[] }[] }
-  employees: { total: number; canReceiveGoods: number; drivers: number }
-  contractTemplates: number
+  company: { exists: boolean; inn: string | null; ready: boolean }
+  didox: { enabled: boolean; baseUrl: string; hasToken: boolean; hasLogin: boolean }
+  telegram: { enabled: boolean; connected: boolean }
+  counterparties: { total: number; noInn: number; sample: { id: number; name: string }[] }
 }
 
 // ── Formatlash ────────────────────────────────────────────────

@@ -1,9 +1,12 @@
 import { useEffect } from 'react'
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth, initials, roleName } from './lib/auth'
+import { setUnreadFromServer, useUnread } from './lib/unread'
 import { useAsync } from './lib/ui'
 import { api, type Role } from './lib/api'
+import { Logo } from './components/Logo'
 import Login from './pages/Login'
+import { ErrorGuard } from './components/ErrorGuard'
 import Realizatsiya from './pages/Realizatsiya'
 import Perehod from './pages/Perehod'
 import AdminView from './pages/AdminView'
@@ -29,37 +32,26 @@ interface NavItem {
  * kunda bir marta kiriladigan odamlar ham bor.
  */
 const NAV: NavItem[] = [
-  { to: '/realizatsiya', label: 'Realizatsiya', hint: 'nima sotdik, puli keldimi',
-    ic: '◈', roles: ['Realizatsiya', 'Admin'], group: 'Mening ishim' },
-  { to: '/perehod', label: 'Perehod', hint: 'hujjat zanjiri butunmi',
-    ic: '⇄', roles: ['Perehod', 'Admin'], group: 'Mening ishim' },
-  { to: '/admin', label: 'Umumiy manzara', hint: 'hamma bitim, ikkala yo\'nalish',
-    ic: '▣', roles: ['Admin'], group: 'Mening ishim' },
+  { to: '/realizatsiya', label: 'Realizatsiya buxgalteriya', hint: 'nima sotdik, puli keldimi',
+    ic: '◈', roles: ['Realizatsiya', 'Admin'], group: 'Kundalik ish' },
+  { to: '/perehod', label: 'Perehod buxgalteriya', hint: 'hujjatlar to\'liq yig\'ildimi',
+    ic: '⇄', roles: ['Perehod', 'Admin'], group: 'Kundalik ish' },
+  { to: '/admin', label: 'Barcha shartnomalar', hint: 'sotuv va xarid — birgalikda',
+    ic: '▣', roles: ['Admin'], group: 'Kundalik ish' },
 
-  { to: '/hisobot', label: 'Hisobot', hint: '30 kunlik to\'liq manzara',
-    ic: '▤', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Mening ishim' },
+  { to: '/hisobot', label: 'Oylik hisobot', hint: 'bir oylik to\'liq manzara',
+    ic: '▤', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Kundalik ish' },
 
-  { to: '/deals', label: 'Shartnomalar', hint: 'to\'liq ro\'yxat va kartochka',
+  { to: '/deals', label: 'Shartnomalar', hint: 'har bir shartnoma: summa, to\'lov, qarz',
     ic: '≡', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Hujjatlar' },
-  { to: '/inbox', label: 'Kiruvchi', hint: 'Didoxdan kelgan hujjatlar',
+  { to: '/inbox', label: 'Kelgan hujjatlar', hint: 'Didoxdan tushgan hujjatlar oqimi',
     ic: '↓', roles: ['Perehod', 'Admin'], group: 'Hujjatlar' },
 
-  { to: '/notifications', label: 'Eslatmalar', hint: 'ko\'rmay qolmaslik uchun',
-    ic: '◔', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Boshqa' },
-  { to: '/setup', label: 'Sozlamalar', hint: 'rekvizitlar, xodimlar, Didox',
-    ic: '⚙', roles: ['Admin'], group: 'Boshqa' },
+  { to: '/notifications', label: 'Eslatmalar', hint: 'botga kelgan xabarlar shu yerda ham',
+    ic: '◔', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Sozlash' },
+  { to: '/setup', label: 'Sozlamalar', hint: 'tizim holati va Bigant INN',
+    ic: '⚙', roles: ['Admin'], group: 'Sozlash' },
 ]
-
-const TITLES: Record<string, [string, string]> = {
-  '/realizatsiya': ['Realizatsiya buxgalteriyasi', 'sotuv hujjatlari va hisob-kitob'],
-  '/perehod': ['Perehod buxgalteriyasi', 'hujjatlar harakati va zanjir'],
-  '/admin': ['Umumiy manzara', 'hamma bitim bir joyda'],
-  '/hisobot': ['Hisobot', 'davr bo\'yicha to\'liq manzara'],
-  '/deals': ['Shartnomalar', 'sotuv va xarid'],
-  '/inbox': ['Kiruvchi hujjatlar', 'postavshikdan va klientdan'],
-  '/notifications': ['Eslatmalar', 'e\'tibor talab qiladigan holatlar'],
-  '/setup': ['Sozlamalar', 'rekvizitlar · xodimlar · Didox tayyorligi'],
-}
 
 /** Rol kirganda birinchi ko'radigan sahifa — o'z ishi. */
 const HOME: Record<Role, string> = {
@@ -69,12 +61,15 @@ const HOME: Record<Role, string> = {
 }
 
 function Shell() {
-  const { me, logout } = useAuth()
-  const loc = useLocation()
+  const { me, logout, inTelegram, checking } = useAuth()
 
-  // O'qilmagan eslatma soni — Telegramga ketgan xabar shu yerda ham sanaladi.
-  const { data: notif } = useAsync<{ unread: number }>(
-    () => api.get('/api/notifications?take=1'), [], 15000)
+  // O'qilmagan eslatma soni. Serverdan vaqti-vaqti bilan yangilanadi, lekin
+  // Eslatmalar sahifasi scroll paytida uni DARHOL kamaytiradi — belgi
+  // eskirgan raqamda turib qolmasin.
+  useAsync<{ unread: number }>(
+    () => api.get<{ unread: number }>('/api/notifications?take=1')
+            .then(r => { setUnreadFromServer(r.unread); return r }), [], 15000)
+  const unread = useUnread() ?? 0
 
   // Rol tusini butun sahifaga beramiz — foydalanuvchi qaysi ekranda
   // turganini rangdan ham sezadi.
@@ -83,23 +78,19 @@ function Shell() {
     return () => document.documentElement.removeAttribute('data-role')
   }, [me])
 
+  // Telegram bizni tanib olguncha kutamiz — login sahifasi chaqnab ketmasin.
+  if (checking) return <div className="boot">Telegram orqali kirilmoqda…</div>
   if (!me) return <Navigate to="/login" replace />
 
   const items = NAV.filter(n => n.roles.includes(me.role))
   const groups = [...new Set(items.map(i => i.group))]
 
-  const key = loc.pathname.startsWith('/deals/') ? '/deals' : loc.pathname
-  const t = TITLES[key] ?? ['Shartnoma kartochkasi', '']
 
   return (
     <div className="app">
       <aside className="side">
         <div className="brand">
-          <div className="brand-mark">B</div>
-          <div>
-            <div className="brand-name">Bigant</div>
-            <div className="role-tag">{roleName(me.role)}</div>
-          </div>
+          <Logo sub={roleName(me.role)} />
         </div>
 
         <nav className="nav">
@@ -111,36 +102,31 @@ function Shell() {
                   className={({ isActive }) => (isActive ? 'on' : '')}>
                   <span className="ic">{i.ic}</span>
                   {i.label}
-                  {i.to === '/notifications' && (notif?.unread ?? 0) > 0 &&
-                    <span className="badge">{notif!.unread}</span>}
+                  {i.to === '/notifications' && unread > 0 &&
+                    <span className="badge">{unread}</span>}
                 </NavLink>
               ))}
             </div>
           ))}
         </nav>
 
-        <div className="side-foot">
-          <div>Xabarlar Telegram botga ham boradi</div>
+        <div className="side-foot user-foot">
+          <div className="avatar">{initials(me.fullName)}</div>
+          <div className="user-info">
+            <div className="user-name">{me.fullName}</div>
+            <div className="user-role">{roleName(me.role)}</div>
+          </div>
+          {/* Telegram ichida chiqishning ma'nosi yo'q: keyingi ochilishda
+              Telegram baribir o'sha odamni tanidi. */}
+          {!inTelegram &&
+            <button className="btn sm" onClick={logout} title="Tizimdan chiqish">Chiqish</button>}
         </div>
       </aside>
 
       <div className="main">
-        <header className="top">
-          <div>
-            <h1>{t[0]}</h1>
-            <div className="top-sub">{t[1]}</div>
-          </div>
-          <div className="top-right">
-            <div style={{ textAlign: 'right', fontSize: 12.5, lineHeight: 1.3 }}>
-              <div style={{ fontWeight: 600 }}>{me.fullName}</div>
-              <div style={{ color: 'var(--ink-3)' }}>{roleName(me.role)}</div>
-            </div>
-            <div className="avatar" title={me.fullName}>{initials(me.fullName)}</div>
-            <button className="btn sm" onClick={logout}>Chiqish</button>
-          </div>
-        </header>
-
         <div className="wrap">
+          {/* Sahifa chizilmasa oq ekran emas, o'qiladigan xato ko'rinsin. */}
+          <ErrorGuard>
           <Routes>
             <Route path="/" element={<Navigate to={HOME[me.role]} replace />} />
             <Route path="/realizatsiya" element={<Guard ok={me.role !== 'Perehod'}><Realizatsiya /></Guard>} />
@@ -154,6 +140,7 @@ function Shell() {
             <Route path="/setup" element={<Guard ok={me.role === 'Admin'}><Setup /></Guard>} />
             <Route path="*" element={<div className="empty">Sahifa topilmadi</div>} />
           </Routes>
+          </ErrorGuard>
         </div>
       </div>
     </div>
@@ -175,11 +162,29 @@ function Guard({ ok, children }: { ok: boolean; children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { me } = useAuth()
+  const { me, inTelegram, checking } = useAuth()
+
+  if (inTelegram && checking) return <div className="boot">Telegram orqali kirilmoqda…</div>
+
   return (
     <Routes>
-      <Route path="/login" element={me ? <Navigate to="/" replace /> : <Login />} />
+      <Route path="/login" element={
+        me ? <Navigate to="/" replace />
+           : inTelegram ? <TelegramDenied /> : <Login />} />
       <Route path="/*" element={<Shell />} />
     </Routes>
+  )
+}
+
+/**
+ * Telegram odamni tanidi, lekin u tizimda yo'q. Bu parol xatosi emas —
+ * shu sabab login formasini ko'rsatish chalg'itadi.
+ */
+function TelegramDenied() {
+  return (
+    <div className="boot boot-deny">
+      <strong>Ruxsat yo'q</strong>
+      <p>Telegram akkauntingiz tizimga biriktirilmagan.<br />Administratorga murojaat qiling.</p>
+    </div>
   )
 }

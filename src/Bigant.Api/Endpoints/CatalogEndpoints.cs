@@ -24,7 +24,7 @@ public static class CatalogEndpoints
     public static void MapCatalogEndpoints(this WebApplication app)
     {
         // ── KONTRAGENTLAR ───────────────────────────────────────────
-        var cp = app.MapGroup("/api/counterparties").WithTags("Katalog").RequireAuthorization();
+        var cp = app.MapGroup("/api/counterparties").WithTags("Katalog").RequireAuthorization().RequireRateLimiting("api");
 
         cp.MapGet("", async (string? q, bool? supplier, bool? client, AppDbContext db, CancellationToken ct) =>
         {

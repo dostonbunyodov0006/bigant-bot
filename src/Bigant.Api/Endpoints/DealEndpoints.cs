@@ -15,7 +15,7 @@ public static class DealEndpoints
 
     public static void MapDealEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/deals").WithTags("Shartnomalar").RequireAuthorization();
+        var g = app.MapGroup("/api/deals").WithTags("Shartnomalar").RequireAuthorization().RequireRateLimiting("api");
 
         // ── Ro'yxat ─────────────────────────────────────────────────
         g.MapGet("", async (DealKind? kind, DealStatus? status, long? counterpartyId,

@@ -19,6 +19,15 @@ public class AppUser
     /// <summary>Foydalanuvchi bildirishnomani o'chirib qo'ygan bo'lsa.</summary>
     public bool TelegramMuted { get; set; }
 
+    /// <summary>
+    /// PAROL TANLASHGA QARSHI HIMOYA.
+    /// Ketma-ket noto'g'ri urinishlar sanaladi; chegaradan oshsa hisob
+    /// vaqtincha bloklanadi. To'g'ri parol kiritilishi bilan nolga tushadi.
+    /// IP chegarasi yolg'iz yetarli emas — hujumchi manzilni almashtira oladi.
+    /// </summary>
+    public int FailedLogins { get; set; }
+    public DateTimeOffset? LockedUntil { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

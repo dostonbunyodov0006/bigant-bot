@@ -55,30 +55,28 @@ export default function Hisobot() {
       {loading || !data ? <Loading /> : (
         <>
           <div className="kpis">
-            <Kpi label="Ochilgan bitim" value={data.deals.opened} note={`${data.period.days} kun ichida`} />
-            <Kpi label="Yopilgan" value={data.deals.closed} tone="ok" note="hujjatlari to'liq" />
-            <Kpi label="Hali ochiq" value={data.deals.stillOpen} note="jarayonda" />
-            <Kpi label="Pul o'tkazdik" value={money(data.money.paidOutTotal)}
+            <Kpi label="Yangi ochilgan shartnoma" value={data.deals.opened} note={`${data.period.days} kun ichida`} />
+            <Kpi label="Tugagan shartnoma" value={data.deals.closed} tone="ok" note="hujjatlari to'liq yig'ilgan" />
+            <Kpi label="Davom etayotgan shartnoma" value={data.deals.stillOpen} note="hujjatlari hali to'liq emas" />
+            <Kpi label="Biz to'lagan pul" value={money(data.money.paidOutTotal)}
               note={`${data.money.paidOutCount} ta to'lov`} />
-            <Kpi label="Pul tushdi" value={money(data.money.receivedTotal)} tone="ok"
+            <Kpi label="Bizga tushgan pul" value={money(data.money.receivedTotal)} tone="ok"
               note={`${data.money.receivedCount} ta to'lov`} />
           </div>
 
-          <div className="grid2">
-            <div className="col">
+          <div className="col">
               <div className="card">
                 <div className="card-h">
-                  <h2>Hujjat harakati</h2>
-                  <span className="hint">davr ichida nechta hujjat ketdi va keldi</span>
+                  <h2>Hujjatlar aylanmasi</h2>
                 </div>
                 <div className="tw">
                   <table>
                     <thead>
                       <tr>
                         <th>Hujjat turi</th>
-                        <th className="r">Biz yubordik</th>
-                        <th className="r">Bizga keldi</th>
-                        <th className="r">Jami</th>
+                        <th className="r">Biz yuborgan hujjat</th>
+                        <th className="r">Bizga kelgan hujjat</th>
+                        <th className="r">Jami hujjat</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -101,20 +99,19 @@ export default function Hisobot() {
 
               <div className="card">
                 <div className="card-h">
-                  <h2>Kontragentlar kesimi</h2>
-                  <span className="hint">eng katta qarzdan boshlab</span>
+                  <h2>Kontragentlar bo'yicha</h2>
                 </div>
                 <div className="tw">
                   <table>
                     <thead>
                       <tr>
-                        <th>MChJ</th><th>Tur</th><th className="r">Bitim</th>
-                        <th className="r">Summa</th><th className="r">To'langan</th><th className="r">Qarz</th>
+                        <th>MChJ nomi</th><th>Yo'nalish</th><th className="r">Shartnoma soni</th>
+                        <th className="r">Umumiy summa</th><th className="r">To'langan summa</th><th className="r">Qolgan qarz</th>
                       </tr>
                     </thead>
                     <tbody>
                       {data.counterparties.length === 0 &&
-                        <tr><td colSpan={6} className="empty">Bu davrda bitim yo'q</td></tr>}
+                        <tr><td colSpan={6} className="empty">Bu davrda shartnoma yo'q</td></tr>}
                       {data.counterparties.map((c, i) => (
                         <tr key={c.name + c.kind + i}>
                           <td style={{ fontWeight: 500 }}>{c.name}</td>
@@ -136,30 +133,30 @@ export default function Hisobot() {
                   </table>
                 </div>
               </div>
-            </div>
+          </div>
 
-            <div className="col">
+          <div className="grid2even">
               <div className="card">
-                <div className="card-h"><h2>Qarzdorlik holati</h2></div>
+                <div className="card-h"><h2>Qarzlar holati</h2></div>
                 <dl className="kv">
-                  <dt>Biz qarzdormiz</dt>
+                  <dt>Biz postavshiklarga qarzdormiz</dt>
                   <dd className="num" style={{ color: 'var(--crit)', fontWeight: 600 }}>
                     {money(data.money.weOwe)}
                   </dd>
-                  <dt>Bizga qarzdor</dt>
+                  <dt>Klientlar bizga qarzdor</dt>
                   <dd className="num" style={{ color: 'var(--ok)', fontWeight: 600 }}>
                     {money(data.money.theyOwe)}
                   </dd>
-                  <dt>Farq</dt>
+                  <dt>Farq (bizning foydamizga)</dt>
                   <dd className="num">{money(data.money.theyOwe - data.money.weOwe)}</dd>
                 </dl>
               </div>
 
               <div className="card">
-                <div className="card-h"><h2>Zanjir sog'ligi</h2></div>
+                <div className="card-h"><h2>Hujjatlari to'liq shartnomalar ulushi</h2></div>
                 <div style={{ padding: '14px 16px' }}>
                   <div style={{ fontSize: 13, color: 'var(--ink-2)', marginBottom: 10 }}>
-                    Ochiq bitimlarda hujjatlar to'g'ri bog'langanmi
+                    Davom etayotgan shartnomalarda hujjatlar to'g'ri bog'langanmi
                   </div>
                   <div className="debt-row">
                     <span>Tekshirilgan</span>
@@ -182,7 +179,6 @@ export default function Hisobot() {
                   </div>
                 </div>
               </div>
-            </div>
           </div>
         </>
       )}

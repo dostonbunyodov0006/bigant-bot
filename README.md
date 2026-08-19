@@ -1,15 +1,15 @@
 # Bigant — hujjat aylanishi va qarzdorlik nazorati
 
-«BIGANT» MChJ (Toshkent, Dombirobod — santexnika va elektr mollari ulgurji savdosi)
-uchun **ekransiz xizmat**: Didox'dan hujjatlarni o'qiydi, zanjirini eslab qoladi va
-Telegram bot orqali bugalterga xabar beradi.
+«BIGANT» MChJ (Toshkent, Dombirobod — santexnika va elektr mollari ulgurji savdosi) uchun.
 
-**Veb-interfeys yo'q va ataylab qo'shilmagan.** Bugalter hujjatni Didox'ning o'zida
-yaratadi va yuboradi; bu tizim faqat kuzatadi, bog'laydi va ogohlantiradi.
+**Hujjat ishi Didox'da bajariladi.** Bugalter dogovor, doverennost, TTN va
+fakturani Didox'ning o'zida yaratadi va yuboradi. Bu tizim ularni **kuzatadi,
+bir-biriga bog'laydi, ogohlantiradi va hisobot beradi** — Telegram bot va
+rolli dashboard orqali.
 
 ---
 
-## Nima uchun bu tizim kerak
+## Nima uchun kerak
 
 Didox — hujjat pochtasi. U quyidagilarni **bilmaydi**:
 
@@ -18,85 +18,106 @@ Didox — hujjat pochtasi. U quyidagilarni **bilmaydi**:
 | Falon MChJ dan faktura keldimi? | ✅ | ✅ |
 | Faktura **aynan qaysi doverennost** uchun? | ⚠️ faqat yuboruvchi `FacturaEmpowermentDoc` ni to'ldirsa | ✅ doim |
 | Doverennost muddati tugayaptimi, tovar hali kelmadimi? | ❌ | ✅ |
-| Falon MChJ ga qancha pul o'tkazdik, qancha qarzimiz qoldi? | ❌ (Didox bank emas) | ✅ |
+| Falon MChJ ga qancha o'tkazdik, qancha qarzimiz qoldi? | ❌ Didox bank emas | ✅ |
 | Doverennostsiz faktura kelib qoldimi? | ❌ | ✅ ogohlantiradi |
+| 30 kunda nima bo'ldi? | ❌ | ✅ hisobot |
 
 ---
 
 ## Ish oqimi
 
-### XARID (postavshikdan olamiz)
+### XARID — postavshikdan olamiz
 ```
-1. Postavshik DOGOVOR yuboradi        →  🔔 «Uzpolimer dan Dogovor keldi»
-2. Biz DOVERENNOST yuboramiz          →  (Didox'da yaratiladi)
-3. Postavshik TTN yuboradi            →  🔔 «...Doverennost: №DOV-2026-00004»
-4. Postavshik FAKTURA yuboradi        →  🔔 «...Doverennost: №DOV-2026-00004»
-5. Bugalter to'lovni botga yozadi     →  🔔 «Qoldi to'lash: 25 000 000»
-```
-
-### SOTUV (klientga sotamiz) — teskarisi
-```
-1. Biz DOGOVOR + SCHYOT yuboramiz
-2. Klient DOVERENNOST yuboradi        →  🔔 xabar
-3. Biz TTN + FAKTURA yuboramiz
-4. Klient pul o'tkazadi               →  bugalter botga yozadi
+1. Postavshik DOGOVOR yuboradi     → 📄 «Dogovor keldi»
+2. Biz DOVERENNOST yuboramiz       → 📤 «Doverennost yuborildi» + muddati
+3. Postavshik TTN yuboradi         → 🚚 «...Doverennost №DOV-... uchun»
+4. Postavshik FAKTURA yuboradi     → 🧾 «...Doverennost №DOV-... uchun»
+5. Bugalter to'lovni botga yozadi  → 💰 «Qoldi to'lash: 25 000 000»
 ```
 
-Har bir hujjat zanjirdagi oldingi bo'g'inga bog'lanadi (`documents.parent_document_id`).
+### SOTUV — klientga sotamiz (teskarisi)
+```
+1. Biz DOGOVOR + SCHYOT yuboramiz  → 📤 xabar
+2. Klient DOVERENNOST yuboradi     → 📝 xabar
+3. Biz TTN + FAKTURA yuboramiz     → 📤 xabar
+4. Klient pul o'tkazadi            → bugalter botga yozadi
+```
+
+Har hujjat zanjirdagi oldingi bo'g'inga bog'lanadi (`documents.parent_document_id`).
+Bog'lanish ikki manbadan: avval **Didox'ning o'z havolasi**
+(`FacturaEmpowermentDoc.EmpowermentNo`), topilmasa tartib bo'yicha taxmin.
 Bog'lanmasa — **qizil ogohlantirish**.
+
+---
+
+## Rollar
+
+Har rol **faqat o'z ishini** ko'radi — backend ham, dashboard ham tekshiradi.
+
+| Rol | Savoli | Ko'radi |
+|---|---|---|
+| **Realizatsiya** | Nima sotdik, kimga, qancha, puli keldimi? | sotuv bitimlari, INN nazorati, QQS, debitor qarz |
+| **Perehod** | Qaysi hujjat qaysiga tegishli, zanjir butunmi? | hujjat zanjiri, uzilishlar, kutilayotgan hujjatlar |
+| **Admin** | Hammasi | ikkala yo'nalish, foydalanuvchilar, sozlamalar |
+
+Har rolning o'z tusi bor: Realizatsiya po'lat-ko'k, Perehod yashil-moviy, Admin shifer.
+
+**Hisobot** — hamma rolga, o'z kesimi bilan: 30 / 90 / 180 / 365 kun.
+Bitimlar, pul harakati, hujjat harakati turlar bo'yicha, kontragent kesimi, zanjir sog'ligi.
 
 ---
 
 ## Telegram bot
 
-Ulash: botni oching, bir marta `/start` yozing. Boshqa hech narsa kerak emas —
-kod, ro'yxatdan o'tish yo'q. `/start` yozilgan chat xabar manziliga aylanadi.
+Ulash: botni oching, bir marta `/start` yozing. **Birinchi `/start` kanalni egallaydi** —
+shundan keyin faqat o'sha chat va ro'yxatdagi xodimlar javob oladi, begonaga
+«kirish huquqi yo'q» deb javob qaytadi.
 
 ### Tugmalar
-| Tugma | Nima ko'rsatadi |
-|---|---|
-| 🔴 **Qarzimiz** | biz qaysi MChJ ga qancha o'tkazganmiz, qancha qolgan |
-| 🟢 **Qarzdorlar** | qaysi MChJ bizga qancha o'tkazgan, qancha qolgan |
-| 🔗 **Zanjir** | dogovor → doverennost → TTN → faktura tekshiruvi |
-| 📊 **Holat** | ochiq shartnomalar, shoshilinch holatlar |
+🔴 **Qarzimiz** · 🟢 **Qarzdorlar** · 🔗 **Zanjir** · 📊 **Holat**
 
 ### To'lov kiritish
 
 Didox pul harakatini ko'rmaydi — **ikkala yo'nalishni ham bugalter yozadi**
-(klient bizning botimizga kirmaydi):
+(klient bizning botimizga kirmaydi). Istalgan yozilish tanib olinadi:
 
 ```
-5 mln tolandi Uzpolimerga            →  BIZ to'ladik
-10 mln otkazdik Temir Yolga          →  BIZ to'ladik
-5 mln Uniform MChJ bizga otkazdi     →  BIZGA tushdi
-12 mln Baraka Stroy bizga tushdi     →  BIZGA tushdi
+5 mln uniform                     →  BIZ to'ladik
+uniform mchj 5 mln                →  BIZ to'ladik
+5 mln tolandi Uzpolimerga         →  BIZ to'ladik
+5 mln Uniform MChJ bizga otkazdi  →  BIZGA tushdi
+12 mln Baraka Stroy bizga tushdi  →  BIZGA tushdi
 ```
 
-Bot darhol javob beradi: qancha o'tkazilgan, qancha qolgan.
 Yo'nalish matndagi «bizga / tushdi / keldi» so'zlaridan aniqlanadi.
+Bot darhol javob beradi va **o'sha zahoti** dashboardga ham xabar chiqadi.
 
-Muqobil: `/api/payments/import` — bank vipiskasini ko'p qatorli import
-(hozir bot orqali emas, HTTP orqali).
-
-### Buyruqlar
-`/holat` `/qarzimiz` `/qarzdorlar` `/qarz` `/zanjir [raqam]` `/tolov` `/start` `/ochirish` `/yordam`
+Muqobil: `POST /api/payments/import` — bank vipiskasini ko'p qatorli import.
 
 ---
 
-## Avtomatik ogohlantirishlar
+## Xabarlar — 19 tur
 
-Har 30 daqiqada tekshiriladi (`ReminderJob`):
+Har xabar **alohida** chiqadi, ish bo'lgan zahoti. Jamlanmaydi.
 
-| Ogohlantirish | Qachon |
-|---|---|
-| 🔴 Pul keldi, tovar berilmadi | to'lov bor, TTN yo'q |
-| 🔴 **Zanjir uzilgan** | faktura/TTN bor, doverennost yo'q |
-| ⏰ Doverennost muddati | tugashiga 3 kun qolganda; o'tsa Critical |
-| ⏰ Qadam kechikdi | cheklist muddati o'tgan |
-| 💰 To'lov | qisman yoki to'liq — qolgan qarz bilan |
-| 📊 Kunlik xulosa | har kuni 09:00 (Toshkent) |
+### Realizatsiya (8)
+🔴 Pul keldi tovar berilmadi · 💸 To'lov kelmadi · 💰 To'lov o'tkazildi/tushdi ·
+✅ Qarz yopildi · 📆 Qarz 30/60/90 kundan oshdi · 💰 Ortiqcha to'lov ·
+📋 Kontragent ma'lumoti to'liq emas · ✅ Shartnoma yopildi
+
+### Perehod (9)
+📄🚚🧾 Hujjat keldi · 📤 Hujjat yuborildi · ⏳ Muddati yaqin (3 kun) ·
+⏰ Kechikdi · ⏳ Doverennost muddati · 🚨 Zanjir uzilgan · ⚠️ Summa mos kelmadi ·
+✅ Zanjir to'liq · 🕛 Bitim uzoq ochiq · 📎 Hujjat bog'lanmagan
+
+### Admin (2)
+🔴 Didox aloqasi uzildi (3 marta ketma-ket xato) · ✅ Aloqa tiklandi
+
+### Hammaga (1)
+📊 Kunlik xulosa — 09:00 (Toshkent)
 
 Tunda (22:00–08:00) faqat Critical xabarlar boradi.
+Uzun xabar avtomatik bo'linadi (Telegram chegarasi 4096).
 
 ---
 
@@ -105,25 +126,23 @@ Tunda (22:00–08:00) faqat Critical xabarlar boradi.
 ```
 src/
   Bigant.Domain/          entitylar, enumlar, DealWorkflow (barcha biznes qoidalar)
-  Bigant.Didox/           IDidoxClient + Null/Http realizatsiyalari, JSON sxemalar
+  Bigant.Didox/           IDidoxClient + Null/Http realizatsiyalari
   Bigant.Infrastructure/  EF Core, servislar, Hangfire jobslar, Telegram
-  Bigant.Api/             Minimal API endpointlar + Program.cs
+  Bigant.Api/             Minimal API + wwwroot (dashboard shu yerdan tarqatiladi)
+web/                      React dashboard (build → src/Bigant.Api/wwwroot)
 ```
 
-**Muhim:** `DealWorkflow.cs` — biznes qoidalarining yagona manbai.
-Cheklist qadamlari, hujjat zanjiri, kim qaysi hujjatni chiqarishi — hammasi shu yerda.
+**`DealWorkflow.cs` — biznes qoidalarining yagona manbai.** Cheklist qadamlari,
+hujjat zanjiri, kim qaysi hujjatni chiqarishi, kim harakat qilishi kerakligi.
 
-### Texnologiyalar
-.NET 10 · PostgreSQL 18 · EF Core · Hangfire (PostgreSQL storage) · Serilog
+.NET 10 · PostgreSQL 18 · EF Core · Hangfire · Serilog · React 19 + Vite
 
 ### Fon vazifalari
 | Job | Jadval | Vazifasi |
 |---|---|---|
-| `InboxJob` | har 10 daq | Didox'dan kiruvchi hujjatlarni oladi |
-| `ReminderJob` | har 30 daq | ogohlantirishlar |
+| `InboxJob` | `Didox:InboxPollMinutes` | Didox'dan **ikkala yo'nalish** hujjatlari |
+| `ReminderJob` | har 30 daq | 12 xil ogohlantirish |
 | `DigestJob` | 09:00 | kunlik xulosa |
-| `OutboxJob` | har 1 daq | chiquvchi hujjat navbati (Didox yoqilganda) |
-| `StatusSyncJob` | har 15 daq | yuborilgan hujjat holati |
 
 ---
 
@@ -145,14 +164,27 @@ export BIGANT_ADMIN_PASSWORD='...'      # faqat birinchi ishga tushirishda
 ```
 
 ### 3. Ishga tushirish
+
+**Ishlab chiqish** — front alohida, jonli qayta yuklash bilan:
 ```bash
 dotnet build
-cd src/Bigant.Api
-ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5080
+cd src/Bigant.Api && ASPNETCORE_ENVIRONMENT=Development dotnet run --urls http://localhost:5080
+# boshqa terminalda:
+cd web && npm install && npm run dev     # http://localhost:5177 (API ga proksi)
 ```
 
-Migratsiyalar avtomatik qo'llanadi (`DbSeeder.SeedAsync`).
-Tekshirish: `curl http://localhost:5080/health` → `{"status":"ok","didox":false}`
+**Bitta xizmat** — serverdagi kabi:
+```bash
+cd web && npm run build          # natija: src/Bigant.Api/wwwroot
+cd ../src/Bigant.Api && dotnet run --urls http://localhost:5080
+# dashboard ham, API ham bitta manzilda
+```
+
+> **CORS kerak emas.** Dashboard backendning o'zidan tarqatiladi (bir xil manba),
+> ishlab chiqishda vite proksi ishlatiladi. `Cors:Origins` bo'sh — eng xavfsiz holat.
+
+Migratsiyalar avtomatik qo'llanadi. Tekshirish:
+`curl http://localhost:5080/health` → `{"status":"ok","didox":false}`
 
 ---
 
@@ -164,8 +196,9 @@ Tizim Didox'siz **to'liq ishlaydi** (`NullDidoxClient`). Yoqish uchun:
 ```jsonc
 "Didox": {
   "Enabled": true,                     // ← DI shu yerdan DidoxHttpClient ga o'tadi
-  "BaseUrl": "https://api.didox.uz",   // test uchun: https://testapi3.didox.uz
-  "CompanyInn": "301234567"
+  "BaseUrl": "https://api.didox.uz",   // test: https://testapi3.didox.uz
+  "CompanyInn": "301234567",
+  "InboxPollMinutes": 2                // qanchalik tez xabar kerak bo'lsa
 }
 ```
 ```bash
@@ -174,49 +207,65 @@ dotnet user-secrets set "Didox:Login" "..."
 dotnet user-secrets set "Didox:Password" "..."
 ```
 
-### 2. `src/Bigant.Didox/DidoxHttpClient.cs` — 3 ta joy to'ldirilishi kerak
+### 2. `src/Bigant.Didox/DidoxHttpClient.cs` — 3 ta joy to'ldiriladi
 
 Kodda `TODO(didox)` deb belgilangan. Manzillar **taxminiy** — rasmiy developer
 hujjatidan tasdiqlang:
 
-| Qator | Nima | Hozirgi taxmin |
-|---|---|---|
-| ~56 | auth endpoint | `v1/auth/login` |
-| ~88 | hujjat yuborish | `v1/documents/{tur}` |
-| ~127 | **kiruvchi hujjatlar** | `v1/documents/inbox?from=...` |
+| Nima | Hozirgi taxmin |
+|---|---|
+| auth endpoint | `v1/auth/login` |
+| **kiruvchi hujjatlar** | `v1/documents/inbox?from=...` |
+| **chiquvchi hujjatlar** | `v1/documents/outbox?from=...` |
 
-Uchinchisi eng muhim — butun notification oqimi shundan boshlanadi.
+Oxirgi ikkitasi eng muhim — butun xabar oqimi shulardan boshlanadi.
+Chiquvchisisiz «dogovor tashlandimi?» degan savolga javob bo'lmaydi.
 
-`PullInboxAsync` → `DidoxInboxItem` qaytaradi → `InboxJob` uni
+`PullInboxAsync` / `PullOutboxAsync` → `DidoxInboxItem` → `InboxJob` uni
 `IInboxService.RegisterAsync` ga uzatadi. **Qolgan hamma kod o'zgarmaydi** —
 zanjir, cheklist, xabar, qarz — hammasi shu bitta nuqtadan oziqlanadi.
 
-### 3. E-IMZO
-Didox yoqilsa imzo majburiy bo'ladi (`MarkSignedAsync` da tekshiriladi).
-Kalit **hech qachon serverda saqlanmaydi** — imzo brauzerda, lokal WebSocket orqali
-qo'yiladi. Bugalterning kompyuteriga E-IMZO o'rnatiladi.
+### 3. Ixtiyoriy, lekin foydali
+`InboxService.ExtractEmpowermentNumber` va `ReadEmpowerment` — Didox xom JSON idan
+doverennost raqami va **amal qilish muddati** o'qiladi. Maydon nomlari `TODO(didox)`
+bilan belgilangan. Noto'g'ri nom hech narsani buzmaydi: kod jimgina taxminga qaytadi,
+lekin muddat ogohlantirishi aniqroq bo'lishi uchun tasdiqlashga arziydi.
 
-### 4. Didox'dan oldin bajarilishi shart
+### 4. Didox'dan oldin
 ```bash
 curl http://localhost:5080/api/didox-readiness -H "Authorization: Bearer <token>"
 ```
-- **MXIK kodlari** — hozir 38 guruhdan 36 tasida yo'q. MXIK'siz soliq fakturani
-  qabul qilmaydi. MXIK guruhdan meros olinadi (`Product.EffectiveMxik`), shuning
-  uchun 2000+ tovarga emas, 38 guruhga bir martadan kiritish yetadi.
-  Kodlar: [tasnif.soliq.uz](https://tasnif.soliq.uz)
 - Kompaniya rekvizitlari to'liq (direktor PINFL, h/r, MFO, OKED)
 - Kontragentlarda direktor F.I.Sh — Didox ikkala tomon uchun majburiy qiladi
 
+> **MXIK kerak emas.** Tovar katalogi olib tashlangan: hujjatni Didox yaratadi,
+> tovar ro'yxatini bugalter Didox'ga kiritadi.
+
 ---
 
-## SERVERGA DEPLOY
+## SERVERGA DEPLOY (Mac mini)
 
-### Environment variable'lar
-`dotnet user-secrets` **faqat Development'da** ishlaydi. Production'da env var:
+Loyiha macOS'da to'liq ishlaydi: Windows'ga xos API yo'q, fayl yo'llari
+`Path.Combine` bilan, vaqt mintaqasi `UzTime.Zone` orqali
+(`Asia/Tashkent` → topilmasa qat'iy UTC+5).
 
 ```bash
-ConnectionStrings__Db="Host=...;Database=bigant;Username=...;Password=..."
-Jwt__Key="<32+ belgi>"
+brew install --cask dotnet-sdk
+brew install postgresql@18 && brew services start postgresql@18
+createdb bigant
+
+git clone <repo> ~/bigant && cd ~/bigant
+cd web && npm install && npm run build && cd ..
+dotnet publish src/Bigant.Api -c Release -o ~/bigant/app
+```
+
+### Environment variable'lar
+`dotnet user-secrets` **faqat Development'da** ishlaydi. Production'da:
+
+```bash
+ASPNETCORE_ENVIRONMENT=Production
+ConnectionStrings__Db="Host=localhost;Database=bigant;Username=...;Password=..."
+Jwt__Key="<32+ belgi, BARQAROR>"
 Telegram__BotToken="..."
 Didox__Enabled=true
 Didox__PartnerToken="..."
@@ -225,31 +274,6 @@ Didox__Password="..."
 Didox__BaseUrl="https://api.didox.uz"
 Didox__CompanyInn="301234567"
 BIGANT_ADMIN_PASSWORD="..."     # faqat birinchi marta
-ASPNETCORE_ENVIRONMENT=Production
-```
-
-### Tekshiruv ro'yxati
-- [ ] PostgreSQL 18, `bigant` bazasi, kunlik backup
-- [ ] `Telegram:WebAppUrl` — bo'sh qoldiring (veb-interfeys yo'q)
-- [ ] Hangfire paneli faqat Development'da ochiq (`Program.cs` da tekshirilgan) —
-      Production'da ochmoqchi bo'lsangiz auth filtri qo'ying
-- [ ] `logs/` katalogi yozilishi mumkin bo'lsin; 30 kun saqlanadi
-- [ ] Xizmat qayta ishga tushganda avtomatik ko'tarilsin (quyida launchd namunasi)
-- [ ] Server vaqti muhim emas — kod Toshkent vaqtini `UzTime` orqali o'zi hisoblaydi,
-      bazada UTC saqlanadi
-
-### macOS (Mac mini) — kunu tun ishlaydigan xizmat
-
-Loyiha macOS'da to'liq ishlaydi: Windows'ga xos API yo'q, fayl yo'llari `Path.Combine`
-bilan quriladi, vaqt mintaqasi `UzTime.Zone` orqali (`Asia/Tashkent` → topilmasa qat'iy UTC+5).
-
-```bash
-brew install --cask dotnet-sdk
-brew install postgresql@18 && brew services start postgresql@18
-createdb bigant
-
-git clone https://github.com/dostonbunyodov0006/bigant-bot.git ~/bigant
-cd ~/bigant && dotnet publish src/Bigant.Api -c Release -o ~/bigant/app
 ```
 
 `~/Library/LaunchAgents/uz.bigant.bot.plist` — kirishda o'zi ishga tushadi,
@@ -270,13 +294,9 @@ qulasa `KeepAlive` qayta ko'taradi:
   <key>EnvironmentVariables</key>
   <dict>
     <key>ASPNETCORE_ENVIRONMENT</key><string>Production</string>
-    <key>ConnectionStrings__Db</key><string>Host=localhost;Database=bigant;Username=...;Password=...</string>
+    <key>ConnectionStrings__Db</key><string>...</string>
     <key>Jwt__Key</key><string>...</string>
     <key>Telegram__BotToken</key><string>...</string>
-    <key>Didox__Enabled</key><string>true</string>
-    <key>Didox__PartnerToken</key><string>...</string>
-    <key>Didox__Login</key><string>...</string>
-    <key>Didox__Password</key><string>...</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -287,70 +307,46 @@ qulasa `KeepAlive` qayta ko'taradi:
 
 ```bash
 launchctl load ~/Library/LaunchAgents/uz.bigant.bot.plist
-curl http://127.0.0.1:5080/health     # {"status":"ok","didox":true}
+curl http://127.0.0.1:5080/health
 ```
 
-**Mac mini uchun qo'shimcha:**
-- **Uyquni o'chiring:** `sudo pmset -a sleep 0 disksleep 0` — aks holda uxlaganda
-  bot xabar qabul qilmaydi.
-- **Avtomatik qayta kirish:** System Settings → Users & Groups → Automatic login
-  (elektr uzilib qayta kelganda LaunchAgent ko'tarilishi uchun). Yoki LaunchAgent
-  o'rniga `/Library/LaunchDaemons` ishlating — u kirishsiz ham ishlaydi.
-- **Internet uzilsa:** Telegram va Didox so'rovlari xatoga tushadi, lekin xizmat
-  qulamaydi — 10 soniyadan keyin qayta uriniladi, `Outbox` navbati saqlanib turadi.
-- Tashqi dunyodan port ochish **shart emas** — xizmat faqat chiquvchi so'rov qiladi
-  (Telegram long polling + Didox). Shuning uchun `127.0.0.1` ga bog'lash yetarli
-  va bu eng xavfsiz variant.
+### Tekshiruv ro'yxati
+- [ ] `web` qurilgan: `npm run build` → `src/Bigant.Api/wwwroot`
+- [ ] `Jwt__Key` **barqaror** — har qayta ishga tushishda o'zgarsa hamma
+      foydalanuvchi tizimdan chiqib ketadi
+- [ ] `Cors:Origins` bo'sh — dashboard bir xil manbadan
+- [ ] PostgreSQL kunlik backup
+- [ ] `sudo pmset -a sleep 0 disksleep 0` — Mac mini uxlamasin
+- [ ] Tashqi port ochish **shart emas**: xizmat faqat chiquvchi so'rov qiladi
+      (Telegram long polling + Didox). `127.0.0.1` ga bog'lash eng xavfsizi.
 
 ### Xavfsizlik
-- Telegram tokeni URL ichida ketadi, shuning uchun `System.Net.Http.HttpClient`
-  loggeri `Warning` ga tushirilgan — aks holda token log fayliga yozilardi
-- `.gitignore`: `logs/`, `appsettings.Production.json`, `*.pfx`, `.env`
-- Login endpointida rate limit (daqiqasiga 10 urinish)
-
----
-
-## HTTP API
-
-Veb-interfeys yo'q, lekin endpointlar **test va integratsiya uchun** ishlaydi
-(hammasi JWT talab qiladi, `/health` dan tashqari).
-
-| Guruh | Asosiy endpointlar |
-|---|---|
-| `/api/auth` | `login`, `me`, `users` |
-| `/api/inbox` | `POST` — kiruvchi hujjatni qo'lda kiritish (Didox bilan **bir xil yo'l**) |
-| `/api/deals` | ro'yxat, kartochka, cheklist qadamlari |
-| `/api/documents` | yaratish, imzolash, navbat |
-| `/api/payments` | to'lov, `debts`, `import` |
-| `/api/notifications` | ro'yxat, `run-check` |
-| `/api/didox-readiness` | Didox'ga tayyorlik tekshiruvi |
-
-> `POST /api/inbox` — `InboxService.RegisterAsync` ni chaqiradi, ya'ni Didox'ning
-> `InboxJob` bilan **aynan bitta kod yo'li**. Didox'siz test qilish uchun ishlatiladi.
+- Telegram tokeni URL ichida ketadi → `System.Net.Http.HttpClient` loggeri
+  `Warning` ga tushirilgan, aks holda token log fayliga yozilardi
+- Botga faqat egallangan chat va ro'yxatdagi xodimlar kira oladi
+- Barcha API endpointlari `RequireAuthorization` + rate limit (300/daq)
+- Login: BCrypt, minimum 8 belgi, rate limit 10/daq
+- Hangfire paneli faqat Development'da
+- Xato javobida stack trace chiqmaydi
+- `.gitignore`: `logs/`, `wwwroot/`, `appsettings.Production.json`, `*.pfx`
 
 ---
 
 ## Ma'lum cheklovlar
 
 1. **Pul ma'lumoti Didox'dan kelmaydi.** Shartnoma summasi Didox'dan, to'langan
-   summa faqat bugalter kiritganidan. Bugalter to'lovni yozishni unutsa, qarz
-   haqiqiydan katta ko'rinadi. Ishonchliroq yo'l — bank vipiskasi importi.
-2. **Zanjir ikki manbadan quriladi.** Kiruvchi hujjatning xom JSON ida Didox'ning
-   o'z havolasi bo'lsa (`FacturaEmpowermentDoc.EmpowermentNo` va o'xshashlari) —
-   aynan o'sha doverennostga bog'lanadi, bu ANIQ ma'lumot. Bo'lmasa — zanjirdagi
-   tartib bo'yicha taxmin qilinadi. Maydon nomlari
-   `InboxService.ExtractEmpowermentNumber` da `TODO(didox)` bilan belgilangan —
-   rasmiy hujjatdan tasdiqlang. Noto'g'ri nom hech narsani buzmaydi: kod
-   jimgina taxminga qaytadi. Chiquvchi fakturamizda `FacturaEmpowermentDoc`
-   hali `null` — uni ham rasmiy sxema bilan to'ldirish kerak.
-3. **`DidoxHttpClient` — skelet.** Yuqoridagi 3 ta `TODO(didox)` to'ldirilmaguncha
-   Didox bilan real aloqa yo'q.
+   summa faqat bugalter kiritganidan. Bugalter yozishni unutsa qarz haqiqiydan
+   katta ko'rinadi. Ishonchliroq yo'l — bank vipiskasi importi.
+2. **Zanjir ikki manbadan.** Didox havolasi bo'lsa aniq, bo'lmasa tartib bo'yicha
+   taxmin. Bitta kontragent bilan bir vaqtda ikkita yetkazib berish ketsa
+   adashishi mumkin.
+3. **`DidoxHttpClient` — skelet.** 3 ta `TODO(didox)` to'ldirilmaguncha real aloqa yo'q.
 
 ---
 
 ## Tarix
 
-Loyiha dastlab veb-dashboard sifatida qurilgan edi. Egasining qarori bilan
-(2026-08-18) interfeys butunlay olib tashlandi: hujjat ishlari Didox'da bajariladi,
-bu tizim faqat kuzatuv va xabar berish uchun qoladi. Sotuvchi roli ham olib
-tashlandi — tizimdan faqat bugalter foydalanadi.
+Loyiha veb-dashboard sifatida boshlangan, keyin egasining qarori bilan
+faqat xizmat + botga qisqartirilgan, so'ng rolli **kuzatuv** dashboardi qaytarilgan.
+Hujjat **chiqarish** mashinasi va tovar katalogi olib tashlangan: hujjat Didox'da
+yaratiladi, bu tizim kuzatadi va ogohlantiradi.

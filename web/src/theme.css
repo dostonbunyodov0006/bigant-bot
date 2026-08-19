@@ -354,6 +354,147 @@ tbody tr:last-child td{ border-bottom:0 }
 /* Jadvalning tashqi ramkasi */
 .tw table{ border:1px solid var(--grid) }
 
-/* Ma'lumot ro'yxati (kartochkadagi «Ma'lumot» bloki) ham ajratilsin */
-.kv{ border-collapse:separate }
+
+/* ══════════════════════════════════════════════════════════════
+   BIGANT LOGOTIPI
+   Belgi + so'z. So'z Archivo bilan zich terilgan — savdo firmasining
+   nomi qat'iy va yig'iq ko'rinsin, bezakka o'xshamasin.
+   ══════════════════════════════════════════════════════════════ */
+.logo{ display:flex; align-items:center; gap:11px }
+.logo-mark{
+  width:40px; height:40px; border-radius:9px; flex:none;
+  background:var(--role); color:#fff;
+  display:grid; place-items:center;
+  box-shadow:0 1px 3px rgba(20,30,40,.18);
+}
+.logo-text{ min-width:0 }
+.logo-name{
+  font-family:Archivo,"IBM Plex Sans",sans-serif;
+  font-weight:700; font-size:19px; line-height:1;
+  letter-spacing:.11em;           /* zich emas — nafis va o'qiladigan */
+  color:var(--ink);
+}
+.logo-sub{
+  font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--role); font-weight:600; margin-top:5px;
+}
+
+/* Sarlavha yonidagi kichik belgi — har panelda ko'rinadi */
+.card-h .card-mark{ color:var(--role); opacity:.55; flex:none; margin-right:2px }
+
+/* ── Foydalanuvchi bloki — chap panelning pastida ── */
+.user-foot{
+  display:flex; align-items:center; gap:10px;
+  padding:12px 14px; border-top:1px solid var(--line);
+}
+.user-info{ min-width:0; flex:1 }
+.user-name{ font-size:12.5px; font-weight:600; color:var(--ink);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.user-role{ font-size:11px; color:var(--ink-3) }
+
+/* Sarlavha paneli olib tashlandi — kontent tepadan boshlanadi */
+.wrap{ padding-top:20px }
+
+/* ── Telegram Mini App: kirish jarayoni va rad javobi ────────────────
+   Bu ekranlar bir necha soniya turadi, shu sabab sokin: hech qanday
+   spinner yoki harakat yo'q — ko'z ilg'amaydigan narsa chalg'itadi. */
+.boot{
+  min-height:100dvh; display:grid; place-content:center;
+  gap:10px; padding:32px; text-align:center;
+  color:var(--ink-3); font-size:13.5px;
+}
+.boot-deny strong{ color:var(--ink); font-size:17px }
+.boot-deny p{ margin:0; line-height:1.6; color:var(--ink-2) }
+
+/* ══════════════════════════════════════════════════════════════
+   JADVALNI O'QISH QULAYLIGI
+   ══════════════════════════════════════════════════════════════ */
+
+/* RAQAM HECH QACHON SINMAYDI.
+   «12 500 000» ikki qatorga bo'linsa, ustun bo'ylab ko'z yugurtirib
+   solishtirib bo'lmaydi — jadvalning butun ma'nosi shunda edi. */
+.num, td.num, .mono{ white-space:nowrap }
+
+/* Pul ustunlari qisilib qolmasin: uzun kontragent nomi ularni
+   siqib qo'ymasligi kerak. */
+td.num, th.r{ min-width:104px }
+
+/* Klaviatura bilan yurganda qaysi qator tanlangani ko'rinsin.
+   Qatorlar bosiladigan (tabIndex=0), lekin belgisi yo'q edi. */
+tbody tr.click:focus-visible{
+  outline:2px solid var(--accent); outline-offset:-2px;
+  background:var(--surface-3);
+}
+
+/* YO'Q HUJJAT — bor hujjatdan aniq farq qilsin.
+   Kulrang to'ldirilgan nishon «bor» dek ko'rinardi; uzuq chiziqli
+   bo'sh nishon esa bir qarashda «hali yo'q» deb o'qiladi. */
+.pill.off{
+  background:transparent; color:var(--ink-3);
+  border:1px dashed var(--line-strong);
+}
+
+/* Kartochkadagi ma'lumot ro'yxati. `border-collapse` bu yerda ishlamasdi
+   (bu jadval emas, ta'rif ro'yxati) — olib tashlandi. */
 .kv dt{ border-right:1px solid var(--grid); padding-right:14px }
+
+/* ── Saralanadigan ustun sarlavhasi ──────────────────────────────────
+   Bosiladigan ekani ko'rinib tursin: kursor va yengil fon o'zgarishi.
+   Faol ustun aksent rangda — qaysi bo'yicha saralanganini bilish uchun. */
+th.sortable{ cursor:pointer; user-select:none }
+th.sortable:hover{ background:var(--surface-2); color:var(--ink) }
+th.sortable.on{ color:var(--accent) }
+th.sortable:focus-visible{ outline:2px solid var(--accent); outline-offset:-2px }
+
+/* Filtr tugmasidagi son */
+.seg-n{ opacity:.65; font-weight:400; margin-left:3px }
+.seg button[aria-pressed="true"] .seg-n{ opacity:.85 }
+
+/* Xarid yo'nalishi — sotuvdan aniq farq qilsin.
+   Ilgari ikkalasi ham bir xil kulrangda edi va ro'yxatda ajralmasdi. */
+.pill.buy{ background:var(--warn-soft); color:var(--warn); border-color:var(--warn-line) }
+
+/* Xabar qaysi rolga tegishli ekanini bildiruvchi kichik yorliq.
+   Admin uch xil ishning xabarini bir ro'yxatda ko'radi — busiz ular
+   aralashib ketadi. */
+.role-tag{
+  font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  font-weight:600; color:var(--ink-3);
+  border:1px solid var(--line); border-radius:4px; padding:1px 6px;
+  flex:none;
+}
+
+/* Ish qatorining o'ng ustuni: «biz yuborishimiz kerak» kabi matn
+   uzun, shuning uchun sinmasin va o'ng chekkaga tekislansin. */
+.work-item > :last-child{
+  text-align:right; font-size:12.5px; color:var(--ink-2);
+  white-space:nowrap; font-weight:500;
+}
+
+/* Uch ustunli qator — yon kartalar jadval ostiga tushadi.
+   Jadval sahifaning yarmida turganda 8 ta ustun sig'masdi va
+   chapga-o'ngga surishga to'g'ri kelardi. */
+.grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start }
+@media(max-width:980px){ .grid3{ grid-template-columns:1fr } }
+
+/* Ikkita teng ustun — keng jadvallar ostidagi kichik kartalar uchun. */
+.grid2even{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start }
+@media(max-width:900px){ .grid2even{ grid-template-columns:1fr } }
+
+/* ── KENG JADVAL BITTA EKRANGA SIG'SIN ────────────────────────────────
+   Ustun nomlari to'liq bo'lishi kerak («Shartnoma summasi», «Bajarilgan
+   bosqich»), lekin ular bir qatorda turganda jadval ekrandan chiqib
+   ketardi va chapga-o'ngga surishga to'g'ri kelardi.
+
+   Yechim: SARLAVHA ikki qatorga tushadi, raqamlar esa hech qachon
+   sinmaydi. Shunda nom ham to'liq qoladi, jadval ham sig'adi. */
+th{
+  white-space:normal;      /* sarlavha bo'linishi mumkin */
+  line-height:1.25;
+  vertical-align:bottom;
+}
+th, td{ padding-left:10px; padding-right:10px }
+
+/* Raqam va sana ustunlari — hech qachon sinmaydi */
+td.num, td.mono, .num, .mono{ white-space:nowrap }
+td.num, th.r{ min-width:92px }

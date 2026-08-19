@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Logo } from '../components/Logo'
 import { useAuth } from '../lib/auth'
 import { errText } from '../lib/ui'
 
@@ -25,12 +26,11 @@ export default function Login() {
   return (
     <div className="login">
       <form className="box" onSubmit={submit}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18 }}>
-          <div className="brand-mark">B</div>
-          <div>
-            <h1>Bigant</h1>
-            <div className="sub" style={{ margin: 0 }}>Hujjat oqimi tizimi</div>
-          </div>
+        {/* Logotipning o'zida chumoli belgisi bor — yonidagi «B» ortiqcha
+            takror edi va ikkita belgi yonma-yon turib chalkashtirardi. */}
+        <div style={{ marginBottom: 20 }}>
+          <Logo />
+          <div className="sub" style={{ margin: '8px 0 0' }}>Hujjat va qarz nazorati</div>
         </div>
 
         {err && <div className="alert crit" style={{ marginBottom: 14 }}><div>{err}</div></div>}

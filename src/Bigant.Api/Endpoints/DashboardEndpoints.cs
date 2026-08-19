@@ -12,7 +12,7 @@ public static class DashboardEndpoints
 {
     public static void MapDashboardEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/dashboard").WithTags("Dashboard").RequireAuthorization();
+        var g = app.MapGroup("/api/dashboard").WithTags("Dashboard").RequireAuthorization().RequireRateLimiting("api");
 
         // ── "Nechta yopildi, nechta ochiq" ──────────────────────────
         g.MapGet("/summary", async (DateOnly? from, DateOnly? to, bool? mine,

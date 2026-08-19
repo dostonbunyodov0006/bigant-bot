@@ -56,7 +56,7 @@ export function Work({ title, empty, items }: {
     <div className="card" style={{ marginBottom: 16 }}>
       <div className="card-h">
         <h2>{title}</h2>
-        {items.length > 0 && <span className="pill warn">{items.length}</span>}
+        {items.length > 0 && <span className="pill warn">{items.length} ta ish</span>}
       </div>
       <div style={{ padding: 14 }}>
         {items.length === 0

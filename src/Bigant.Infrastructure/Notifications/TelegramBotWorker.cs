@@ -58,6 +58,8 @@ public sealed partial class TelegramBotWorker : BackgroundService
 
         _log.LogInformation("Telegram bot tinglovchisi ishga tushdi");
 
+        await RegisterCommandsAsync(ct);
+
         while (!ct.IsCancellationRequested)
         {
             try
@@ -94,6 +96,47 @@ public sealed partial class TelegramBotWorker : BackgroundService
         }
     }
 
+    /// <summary>
+    /// BUYRUQLAR MENYUSI.
+    ///
+    /// Busiz Telegramda «/» bosilganda hech narsa chiqmasdi — bugalter
+    /// bot nima qila olishini bilishi uchun kimdandir so'rashi kerak edi.
+    /// Endi ro'yxat izohlari bilan o'zi ko'rinadi.
+    ///
+    /// Bir marta, bot ishga tushganda yuboriladi. Xato bo'lsa ham bot
+    /// ishlashda davom etadi — menyu qulaylik, shart emas.
+    /// </summary>
+    private async Task RegisterCommandsAsync(CancellationToken ct)
+    {
+        var commands = new object[]
+        {
+            new { command = "holat",      description = "Nechta shartnoma ochiq, qancha qarz" },
+            new { command = "qarzimiz",   description = "Biz kimga qancha qarzdormiz" },
+            new { command = "qarzdorlar", description = "Bizga kim qancha qarzdor" },
+            new { command = "qarz",       description = "Ikkala tomonlama qarz ro'yxati" },
+            new { command = "zanjir",     description = "Qaysi hujjat qaysi asosda chiqqan" },
+            new { command = "tolov",      description = "To'lov kiritish: /tolov 5 mln Uniform" },
+            new { command = "yordam",     description = "Bot nima qila oladi" },
+            new { command = "start",      description = "Xabarlarni shu chatga ulash" },
+            new { command = "ochirish",   description = "Xabarlarni to'xtatish" },
+        };
+
+        try
+        {
+            var http = _httpFactory.CreateClient("telegram-poll");
+            using var resp = await http.PostAsJsonAsync(
+                $"https://api.telegram.org/bot{_opt.BotToken}/setMyCommands",
+                new { commands }, ct);
+
+            if (resp.IsSuccessStatusCode) _log.LogInformation("Telegram buyruqlar menyusi yangilandi");
+            else _log.LogWarning("Buyruqlar menyusi o'rnatilmadi: {Status}", resp.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Buyruqlar menyusini o'rnatishda xato");
+        }
+    }
+
     private async Task<List<TgUpdate>> GetUpdatesAsync(CancellationToken ct)
     {
         var http = _httpFactory.CreateClient("telegram-poll");
@@ -115,6 +158,9 @@ public sealed partial class TelegramBotWorker : BackgroundService
                       .OfType<TelegramChannel>().FirstOrDefault();
         if (tg is null) return;
 
+        var notify = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var payments = scope.ServiceProvider.GetRequiredService<IPaymentService>();
+
         var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         var cmd = parts[0].ToLowerInvariant().Split('@')[0];
         var arg = parts.Length > 1 ? parts[1].Trim() : null;
@@ -127,6 +173,63 @@ public sealed partial class TelegramBotWorker : BackgroundService
         else if (text.Contains("Holat", StringComparison.OrdinalIgnoreCase) && !text.StartsWith('/')) { cmd = "/holat"; arg = null; }
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.TelegramChatId == chatId, ct);
+
+        // ── TELEGRAM AKKAUNTINI O'ZI ULASH ──
+        // Chat hali biriktirilmagan bo'lsa, xodimni Telegram USERNAME'i
+        // bo'yicha tanib olamiz: admin xodim yaratganda uning @username'ini
+        // yozib qo'yadi, xodim esa shunchaki /start bosadi.
+        //
+        // Ilgari bu yerda kodli ulash bor edi (panelda kod olib, botga yozish).
+        // Panel ekrani olib tashlangach kod olish joyi qolmadi va xodim
+        // o'z Telegramini umuman ulay olmasdi — rolga ajratish shu sabab
+        // amalda ishlamasdi.
+        if (user is null && !string.IsNullOrWhiteSpace(username))
+        {
+            var want = Fold(username);
+            var candidates = await db.Users
+                .Where(u => u.IsActive && u.TelegramChatId == null && u.TelegramUsername != null)
+                .ToListAsync(ct);
+
+            // Solishtirish katta-kichik harf va x/h farqisiz — egasining talabi.
+            var match = candidates.FirstOrDefault(u => Fold(u.TelegramUsername!.TrimStart('@')) == want);
+            if (match is not null)
+            {
+                match.TelegramChatId = chatId;
+                match.TelegramMuted = false;
+                await db.SaveChangesAsync(ct);
+                user = match;
+
+                _log.LogInformation("Telegram o'zi ulandi: @{User} → {Login} ({Role})",
+                    username, match.Username, match.Role);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════
+        //  RUXSAT TEKSHIRUVI
+        //
+        //  Bot username bo'yicha topiladi — begona odam ham yozishi mumkin.
+        //  Tekshiruvsiz u soxta to'lov kiritib buxgalteriyani buzardi va
+        //  barcha qarzlarni o'qib olardi. (2026-08-19 auditda topilgan.)
+        //
+        //  Qoida sodda: BIRINCHI /start kanalni egallaydi. Shundan keyin
+        //  faqat o'sha chat va ro'yxatdagi xodimlar javob oladi.
+        //  Kod kiritish yo'q — egasi shuni so'ragan.
+        // ══════════════════════════════════════════════════════════
+        var companyChat = await db.CompanyProfiles.Select(p => p.TelegramChatId).FirstOrDefaultAsync(ct);
+        var claimed = !string.IsNullOrWhiteSpace(companyChat);
+        var allowed = !claimed                       // hali hech kim egallamagan
+                   || companyChat == chatId          // kompaniya chati
+                   || user is not null;              // ro'yxatdagi xodim
+
+        if (!allowed)
+        {
+            _log.LogWarning("Telegram: ruxsatsiz chat {ChatId} (@{User}) — «{Text}»",
+                chatId, username ?? "-", text.Length > 40 ? text[..40] : text);
+            await tg.SendPlainAsync(chatId,
+                "Bu bot «BIGANT» MChJ ning ichki xizmat boti.\n" +
+                "Sizda kirish huquqi yo'q.", ct);
+            return;
+        }
 
         switch (cmd)
         {
@@ -143,34 +246,86 @@ public sealed partial class TelegramBotWorker : BackgroundService
                     return;
                 }
 
-                var wasConnected = profile.TelegramChatId == chatId;
-                profile.TelegramChatId = chatId;
-                await db.SaveChangesAsync(ct);
+                // ── UMUMIY KANALNI TORTIB OLISH MUMKIN EMAS ──
+                // Ilgari bu yer `profile.TelegramChatId = chatId` deb yozardi.
+                // Natijada ro'yxatdagi ikkinchi xodim /start bossa, umumiy
+                // kanal jimgina unga ko'chib, EGASI hamma xabarni yo'qotardi.
+                // Endi bo'sh kanalgina egallanadi.
+                if (string.IsNullOrWhiteSpace(profile.TelegramChatId))
+                {
+                    profile.TelegramChatId = chatId;
+                    await db.SaveChangesAsync(ct);
 
-                await tg.SendWithMenuAsync(chatId,
-                    wasConnected
-                        ? "✅ Allaqachon ulangan. Xabarlar shu yerga kelmoqda."
-                        : "✅ <b>Ulandi.</b>\n\n" +
-                          "Endi barcha bildirishnomalar shu yerga keladi:\n" +
-                          "• Pul keldi, tovar berilmadi\n" +
-                          "• To'lov kechikdi\n" +
-                          "• Yangi dogovor yoki faktura keldi\n" +
-                          "• Hujjat rad etildi\n" +
-                          "• Har kuni 09:00 da kunlik xulosa\n\n" +
-                          "/holat — hozirgi manzara\n" +
-                          "/ochirish — xabarlarni to'xtatish", ct);
+                    await tg.SendWithMenuAsync(chatId,
+                        "✅ <b>Ulandi.</b>\n\n" +
+                        "Endi barcha bildirishnomalar shu yerga keladi:\n" +
+                        "• Pul keldi, tovar berilmadi\n" +
+                        "• To'lov kechikdi\n" +
+                        "• Yangi dogovor yoki faktura keldi\n" +
+                        "• Hujjat rad etildi\n" +
+                        "• Har kuni 09:00 da kunlik xulosa\n\n" +
+                        "/holat — hozirgi manzara\n" +
+                        "/ochirish — xabarlarni to'xtatish", ct);
 
-                _log.LogInformation("Telegram ulandi: chat {ChatId} (@{User})", chatId, username ?? "-");
+                    _log.LogInformation("Telegram umumiy kanali ulandi: chat {ChatId} (@{User})",
+                        chatId, username ?? "-");
+                    return;
+                }
+
+                if (profile.TelegramChatId == chatId)
+                {
+                    await tg.SendWithMenuAsync(chatId,
+                        "✅ Allaqachon ulangan. Xabarlar shu yerga kelmoqda.", ct);
+                    return;
+                }
+
+                // Umumiy kanal boshqa chatda — bu odam SHAXSIY obunachi.
+                // Unga faqat o'z roliga tegishli xabarlar boradi.
+                if (user is not null)
+                {
+                    if (user.TelegramMuted)
+                    {
+                        user.TelegramMuted = false;
+                        await db.SaveChangesAsync(ct);
+                    }
+
+                    await tg.SendWithMenuAsync(chatId,
+                        $"✅ <b>Ulandi — {RoleTitle(user.Role)}.</b>\n\n" +
+                        "Sizga o'z ishingizga tegishli xabarlar keladi.\n\n" +
+                        "/holat — hozirgi manzara\n" +
+                        "/ochirish — o'zingizga kelishini to'xtatish", ct);
+
+                    _log.LogInformation("Telegram shaxsiy obuna: {User} ({Role}), chat {ChatId}",
+                        user.Username, user.Role, chatId);
+                }
                 return;
             }
 
             case "/ochirish":
             case "/stop":
             {
+                // Har kim FAQAT o'zinikini o'chira oladi. Ilgari bu yer umumiy
+                // kanalni kimdan kelganidan qat'i nazar o'chirardi — ya'ni
+                // bitta xodim butun kompaniyani xabarsiz qoldira olardi.
                 var p = await db.CompanyProfiles.FirstOrDefaultAsync(ct);
-                if (p is not null) { p.TelegramChatId = null; await db.SaveChangesAsync(ct); }
-                await tg.SendPlainAsync(chatId,
-                    "🔕 Xabarlar to'xtatildi. Qayta yoqish uchun /start yozing.", ct);
+
+                if (p is not null && p.TelegramChatId == chatId)
+                {
+                    p.TelegramChatId = null;
+                    await db.SaveChangesAsync(ct);
+                    await tg.SendPlainAsync(chatId,
+                        "🔕 Umumiy xabarlar to'xtatildi. Qayta yoqish uchun /start yozing.", ct);
+                    return;
+                }
+
+                if (user is not null)
+                {
+                    user.TelegramMuted = true;
+                    await db.SaveChangesAsync(ct);
+                    await tg.SendPlainAsync(chatId,
+                        "🔕 Sizga xabar kelmaydi. Qayta yoqish uchun /start yozing.\n" +
+                        "<i>Boshqa xodimlar xabar olishda davom etadi.</i>", ct);
+                }
                 return;
             }
 
@@ -182,7 +337,7 @@ public sealed partial class TelegramBotWorker : BackgroundService
             // ── TO'LOV KIRITISH ──
             // Didox to'lovni ko'rmaydi — bugalter shu yerga yozadi.
             case "/tolov":
-                await HandlePaymentAsync(db, tg, chatId, arg, ct);
+                await HandlePaymentAsync(db, tg, notify, payments, chatId, arg, ct);
                 return;
 
             // 🔴 QARZIMIZ — biz postavshiklarga qancha qarzdormiz
@@ -213,17 +368,45 @@ public sealed partial class TelegramBotWorker : BackgroundService
 
             case "/yordam":
             case "/help":
-                await tg.SendPlainAsync(chatId,
-                    "<b>Buyruqlar</b>\n" +
-                    "/holat — umumiy manzara\n" +
-                    "/qarz — kim qancha qarz\n" +
-                    "/tolov — to'lov kiritish\n" +
-                    "/start — xabarlarni shu chatga ulash\n" +
-                    "/ochirish — xabarlarni to'xtatish\n\n" +
-                    "<b>To'lov kiritish</b>\n" +
-                    "Buyruqsiz ham bo'ladi — shunchaki yozing:\n" +
-                    "<code>5 mln tolandi Uzpolimerga</code>\n" +
-                    "<code>/tolov 5000000 Uzpolimer</code>", ct);
+                await tg.SendWithMenuAsync(chatId,
+                    "<b>BIGANT — hujjat va qarz nazorati</b>\n\n" +
+
+                    "Bu bot Didox'ni kuzatib turadi. Hujjat kelishi bilan\n" +
+                    "sizga xabar beradi va qarzni o'zi hisoblaydi.\n" +
+                    "<i>Hujjat yaratish Didox'da qoladi — bot faqat kuzatadi.</i>\n\n" +
+
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "<b>1. O'ZI XABAR BERADI</b>\n" +
+                    "Hech narsa so'ramaysiz — o'zi yozadi:\n\n" +
+                    "📄 dogovor keldi\n" +
+                    "📝 doverennost chiqdi — muddati bilan\n" +
+                    "🚚 TTN keldi\n" +
+                    "🧾 faktura keldi — QQS bilan\n" +
+                    "💰 to'lov o'tdi — qancha qarz qolgani bilan\n" +
+                    "⚠️ nomuvofiqlik: summa mos emas, INN boshqa,\n" +
+                    "    doverennost muddati o'tgan, tovar bor faktura yo'q\n\n" +
+
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "<b>2. SIZ SO'RAY OLASIZ</b>\n\n" +
+                    "/holat — nechta shartnoma ochiq, umumiy qarz\n" +
+                    "/qarzimiz — biz kimga qancha qarzdormiz\n" +
+                    "/qarzdorlar — bizga kim qancha qarzdor\n" +
+                    "/zanjir — qaysi dogovorga qaysi doverennost,\n" +
+                    "    qaysi doverennostga qaysi faktura chiqqan\n\n" +
+
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "<b>3. TO'LOV KIRITISH</b>\n" +
+                    "Didox to'lovni ko'rmaydi — uni siz yozasiz.\n" +
+                    "Buyruq shart emas, shunchaki yozing:\n\n" +
+                    "<code>5 mln tolandi Uniformga</code>\n" +
+                    "<i>(biz to'ladik)</i>\n\n" +
+                    "<code>Uniform bizga 5 mln otkazdi</code>\n" +
+                    "<i>(bizga tushdi)</i>\n\n" +
+                    "Bot qarzni qayta hisoblab, qancha qolganini aytadi.\n\n" +
+
+                    "━━━━━━━━━━━━━━━━━━━━\n" +
+                    "<i>Katta-kichik harf va x/h farqi yo'q —\n" +
+                    "«uniform», «UNIFORM», «unihorm» bir xil topiladi.</i>", ct);
                 return;
 
             default:
@@ -235,7 +418,7 @@ public sealed partial class TelegramBotWorker : BackgroundService
                 // Buyruqsiz matn — to'lov deb o'qib ko'ramiz.
                 // «5 mln tolandi Uzpolimerga» kabi yozuvlar shu yerga tushadi.
                 if (LooksLikePayment(text))
-                    await HandlePaymentAsync(db, tg, chatId, text, ct);
+                    await HandlePaymentAsync(db, tg, notify, payments, chatId, text, ct);
                 return;
         }
     }
@@ -251,8 +434,9 @@ public sealed partial class TelegramBotWorker : BackgroundService
     /// </summary>
     private static bool LooksLikePayment(string text) => AmountRegex().IsMatch(text);
 
-    private async Task HandlePaymentAsync(AppDbContext db, TelegramChannel tg, string chatId,
-                                          string? arg, CancellationToken ct)
+    private async Task HandlePaymentAsync(AppDbContext db, TelegramChannel tg,
+                                          INotificationService notify, IPaymentService payments,
+                                          string chatId, string? arg, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(arg))
         {
@@ -326,8 +510,8 @@ public sealed partial class TelegramBotWorker : BackgroundService
             var hint = other is null
                 ? $"{Esc(cp.Name)} bo'yicha to'lanmagan ochiq bitim yo'q."
                 : $"{Esc(cp.Name)} bo'yicha " +
-                  (weReceived ? "SOTUV" : "XARID") + " bitimi topilmadi.\n\n" +
-                  $"Ochiq bitim: <code>{Esc(other.Number)}</code> " +
+                  (weReceived ? "SOTUV" : "XARID") + " shartnomasi topilmadi.\n\n" +
+                  $"Ochiq shartnoma: <code>{Esc(other.Number)}</code> " +
                   (other.Kind == DealKind.Sale ? "(bizga qarzdor)" : "(biz qarzdormiz)") + "\n" +
                   (other.Kind == DealKind.Sale
                       ? "Shuni nazarda tutgan bo'lsangiz: <code>5 mln " + Esc(cp.Name) + " bizga otkazdi</code>"
@@ -336,47 +520,42 @@ public sealed partial class TelegramBotWorker : BackgroundService
             return;
         }
 
+        // ── TO'LOVNI XIZMAT ORQALI YOZAMIZ ──
+        // Ilgari bot bazaga TO'G'RIDAN-TO'G'RI yozardi va PaymentService dagi
+        // qoidalarni chetlab o'tardi: takroriy bank hujjati tekshiruvi,
+        // summa nazorati, ortiqcha to'lov ogohlantirishi — hech biri ishlamasdi.
+        // Bundan tashqari xabar matni ikki joyda alohida yozilgani uchun
+        // bot orqali kiritilgan to'lov boshqacha ko'rinishda kelardi.
+        // Endi ikkalasi ham bitta yo'ldan o'tadi.
         var actor = await db.Users
             .FirstOrDefaultAsync(u => (u.Role == UserRole.Realizatsiya || u.Role == UserRole.Admin) && u.IsActive, ct)
             ?? await db.Users.FirstAsync(u => u.IsActive, ct);
 
         var direction = weReceived ? PaymentDirection.In : PaymentDirection.Out;
 
-        db.Payments.Add(new Payment
+        try
         {
-            CounterpartyId = cp.Id,
-            DealId = deal.Id,
-            Direction = direction,
-            Amount = sum,
-            PayDate = UzTime.Today,
-            Purpose = "Telegram orqali kiritildi",
-            MatchedBy = "telegram",
-            CreatedByUserId = actor.Id
-        });
-        await db.SaveChangesAsync(ct);
+            await payments.RegisterAsync(new NewPayment(
+                CounterpartyId: cp.Id,
+                DealId: deal.Id,
+                Direction: direction,
+                Amount: sum,
+                PayDate: UzTime.Today,
+                BankDocNo: null,
+                Purpose: "Telegram orqali kiritildi"), actor, ct);
+        }
+        catch (BusinessException ex)
+        {
+            await tg.SendPlainAsync(chatId, "⚠️ " + Esc(ex.Message), ct);
+            return;
+        }
 
-        // Bitimni qayta hisoblaymiz — qarz va cheklist qadami yangilanadi.
-        await db.Entry(deal).Collection(d => d.Payments).LoadAsync(ct);
-        deal.AmountPaid = deal.Payments.Sum(p => p.Amount);
+        // Xizmat bitimni yangiladi — qarzning yangi holatini o'qiymiz.
+        await db.Entry(deal).ReloadAsync(ct);
         var debt = deal.AmountTotal - deal.AmountPaid;
         var isFull = deal.AmountTotal > 0 && debt <= 0.01m;
 
-        var step = deal.Steps.FirstOrDefault(s => s.Step == StepType.Payment);
-        if (step is not null)
-        {
-            if (isFull)
-            {
-                step.Status = StepStatus.Done;
-                step.CompletedAt = DateTimeOffset.UtcNow;
-                step.Note = $"To'liq to'landi: {deal.AmountPaid:N0}";
-            }
-            else
-            {
-                step.Status = StepStatus.Pending;
-                step.Note = $"To'langan {deal.AmountPaid:N0} / {deal.AmountTotal:N0} — qarz {debt:N0} so'm";
-            }
-        }
-        await db.SaveChangesAsync(ct);
+        await notify.PushPendingAsync(ct);
 
         // Yo'nalishga qarab so'zlar o'zgaradi — bugalter nimani yozganini
         // ko'rib, xato kiritgan bo'lsa darhol sezsin.
@@ -424,7 +603,7 @@ public sealed partial class TelegramBotWorker : BackgroundService
         var deals = await q.OrderByDescending(d => d.CreatedAt).Take(10).ToListAsync(ct);
         if (deals.Count == 0)
             return string.IsNullOrWhiteSpace(arg)
-                ? "Ochiq bitim yo'q."
+                ? "Ochiq shartnoma yo'q."
                 : $"«{Esc(arg!)}» bo'yicha bitim topilmadi.";
 
         var ids = deals.Select(d => d.Id).ToList();
@@ -455,7 +634,7 @@ public sealed partial class TelegramBotWorker : BackgroundService
                 sb.Append($"   {arrow} {Esc(DealWorkflow.DocLabel(x.DocType))} " +
                           $"<code>{Esc(x.DocNumber ?? "—")}</code>\n");
                 sb.Append(basis is null
-                    ? "      <i>zanjir boshi</i>\n"
+                    ? "      <i>birinchi hujjat</i>\n"
                     : $"      ↳ asos: {Esc(basis)}\n");
             }
 
@@ -470,12 +649,12 @@ public sealed partial class TelegramBotWorker : BackgroundService
             }
             else
             {
-                sb.Append("   ✅ zanjir butun\n");
+                sb.Append("   ✅ hujjatlari to'liq\n");
             }
         }
 
         var head = totalBreaks == 0
-            ? "<b>Hujjat zanjiri</b> — hammasi joyida\n"
+            ? "<b>Hujjatlar tartibi</b> — hammasi joyida\n"
             : $"<b>Hujjat zanjiri</b> — ⚠️ {totalBreaks} ta uzilish\n";
 
         return head + sb;
@@ -518,8 +697,12 @@ public sealed partial class TelegramBotWorker : BackgroundService
         var today = UzTime.Today;
         var sb = new System.Text.StringBuilder(head + "\n");
 
-        foreach (var g in rows.GroupBy(r => r.Name)
-                              .OrderByDescending(g => g.Sum(x => x.Debt)))
+        var groups = rows.GroupBy(r => r.Name)
+                         .OrderByDescending(g => g.Sum(x => x.Debt))
+                         .ToList();
+        const int Show = 12;
+
+        foreach (var g in groups.Take(Show))
         {
             sb.Append($"\n━━━━━━━━━━━━━━━━━━\n<b>{Esc(g.Key)}</b>\n");
             foreach (var r in g.OrderByDescending(x => x.Debt))
@@ -536,6 +719,15 @@ public sealed partial class TelegramBotWorker : BackgroundService
                               : $"QOLDI      {r.Debt,15:N0}\n");
                 sb.Append("</pre>");
             }
+        }
+
+        if (groups.Count > Show)
+        {
+            var rest = groups.Skip(Show).ToList();
+            sb.Append("\n━━━━━━━━━━━━━━━━━━\n");
+            sb.Append($"<i>va yana {rest.Count} ta kontragent — ");
+            sb.Append($"jami {rest.Sum(x => x.Sum(y => y.Debt)):N0} so'm.\n");
+            sb.Append("To'liq ro'yxat dashboardda.</i>\n");
         }
 
         return sb.ToString();
@@ -595,41 +787,108 @@ public sealed partial class TelegramBotWorker : BackgroundService
     private static async Task<List<Counterparty>> FindCounterpartiesAsync(
         AppDbContext db, string raw, CancellationToken ct)
     {
-        var found = new Dictionary<long, Counterparty>();
+        // Kontragentlar ro'yxati kichik (o'nlab), shuning uchun hammasini
+        // olib, xotirada YUMSHATILGAN ko'rinishda solishtiramiz. Bu bazadagi
+        // ILIKE dan ancha kechirimliroq: katta-kichik harf, qattiq/yumshoq
+        // «x»–«h», apostrof, chiziqcha — hech biri to'siq bo'lmaydi.
+        var all = await db.Counterparties.AsNoTracking().ToListAsync(ct);
 
-        async Task TryAsync(string needle)
+        var found = new Dictionary<long, Counterparty>();
+        var needle = Fold(raw);
+
+        void Match(string n)
         {
-            if (found.Count > 0) return;                 // birinchi bosqich yetdi
-            if (needle.Length < 3) return;
-            var rows = await db.Counterparties.AsNoTracking()
-                .Where(c => EF.Functions.ILike(c.Name, $"%{needle}%"))
-                .Take(5).ToListAsync(ct);
-            foreach (var r in rows) found.TryAdd(r.Id, r);
+            if (found.Count > 0 || n.Length < 3) return;
+            foreach (var c in all)
+            {
+                var name = Fold(c.Name);
+                if (name.Contains(n, StringComparison.Ordinal) ||
+                    n.Contains(name, StringComparison.Ordinal))
+                    found.TryAdd(c.Id, c);
+            }
         }
 
-        await TryAsync(raw);
+        Match(needle);
 
-        // Har bir so'z bo'yicha — «Uniform MChJ» dan «Uniform» ni topadi.
+        var words = raw.Split([' ', '\t', ',', '.', '"', '«', '»', '-'],
+                              StringSplitOptions.RemoveEmptyEntries)
+                       .Select(x => Fold(TrimSuffix(x)))
+                       .Where(x => x.Length >= 3)
+                       .ToList();
+
+        // Yozilgan HAMMA so'z nomda uchrasa — mos deb hisoblaymiz.
+        // «Buhgalteriya MCHJ» → «Buxgalteriya Servis MChJ» ni topadi:
+        // o'rtadagi «Servis» tushib qolgani to'siq bo'lmaydi.
+        if (found.Count == 0 && words.Count > 0)
+        {
+            foreach (var c in all)
+            {
+                var name = Fold(c.Name);
+                if (words.All(w => name.Contains(w, StringComparison.Ordinal)))
+                    found.TryAdd(c.Id, c);
+            }
+        }
+
+        // Oxirgi chora — bitta so'z bo'yicha, eng uzunidan boshlab.
         if (found.Count == 0)
         {
-            var words = raw.Split([' ', '\t', ',', '.', '"', '«', '»'],
-                                  StringSplitOptions.RemoveEmptyEntries)
-                           .Select(TrimSuffix)
-                           .Where(w => w.Length >= 3)
-                           .OrderByDescending(w => w.Length)
-                           .ToList();
-
-            foreach (var w in words)
+            foreach (var w in words.OrderByDescending(x => x.Length))
             {
-                var rows = await db.Counterparties.AsNoTracking()
-                    .Where(c => EF.Functions.ILike(c.Name, $"%{w}%"))
-                    .Take(5).ToListAsync(ct);
-                foreach (var r in rows) found.TryAdd(r.Id, r);
-                if (found.Count > 0) break;              // eng uzun so'z g'olib
+                Match(w);
+                if (found.Count > 0) break;
             }
         }
 
         return [.. found.Values];
+    }
+
+    /// <summary>
+    /// NOMNI YUMSHATISH — bugalter qanday yozsa ham topilsin.
+    ///
+    /// O'zbek tilida bir xil so'z turlicha yoziladi:
+    ///   Buxgalter / Buhgalter,  Toshkent / Toshkent,  O'zbek / Ozbek / Uzbek
+    /// Bundan tashqari katta-kichik harf, apostrof turlari (' ' ʻ `),
+    /// chiziqcha va bo'shliqlar ham farq qilmasligi kerak.
+    ///
+    /// Qoida: hammasi kichik harfga, «x» → «h», apostrof va tinish
+    /// belgilari olib tashlanadi, «ў/қ/ғ/ҳ» kirill harflari lotinga o'giriladi.
+    /// </summary>
+    /// <summary>Rol nomi — ulanish tasdig'ida odam o'zini tanib olsin.</summary>
+    private static string RoleTitle(UserRole role) => role switch
+    {
+        UserRole.Realizatsiya => "realizatsiya buxgalteri",
+        UserRole.Perehod      => "perehod buxgalteri",
+        UserRole.Admin        => "administrator",
+        _ => "xodim"
+    };
+
+    private static string Fold(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+
+        foreach (var ch in s.ToLowerInvariant())
+        {
+            var c = ch switch
+            {
+                // Qattiq «x» va yumshoq «h» — bir xil hisoblanadi.
+                'x' => 'h',
+                // Kirill yozuvidan tushib qolgan harflar.
+                'ў' => 'o', 'қ' => 'q', 'ғ' => 'g', 'ҳ' => 'h',
+                'а' => 'a', 'б' => 'b', 'в' => 'v', 'г' => 'g', 'д' => 'd',
+                'е' => 'e', 'ё' => 'e', 'ж' => 'j', 'з' => 'z', 'и' => 'i',
+                'й' => 'y', 'к' => 'k', 'л' => 'l', 'м' => 'm', 'н' => 'n',
+                'о' => 'o', 'п' => 'p', 'р' => 'r', 'с' => 's', 'т' => 't',
+                'у' => 'u', 'ф' => 'f', 'х' => 'h', 'ц' => 's', 'ч' => 'c',
+                'ш' => 's', 'э' => 'e', 'ю' => 'u', 'я' => 'a',
+                _ => ch
+            };
+
+            // Harf va raqamdan boshqasi tashlanadi: apostrof, chiziqcha,
+            // qo'shtirnoq, bo'shliq — nomni ajratishga xalaqit bermasin.
+            if (char.IsLetterOrDigit(c)) sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     [GeneratedRegex(@"(?<num>\d[\d\s.,]*)\s*(?<unit>mln\.?|million|mlrd|milliard|ming|tys|so'?m|sum)?",

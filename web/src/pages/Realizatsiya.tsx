@@ -1,7 +1,10 @@
 import { useNavigate } from 'react-router-dom'
 import { api, money, dateUz } from '../lib/api'
 import { ErrorBox, Loading, useAsync } from '../lib/ui'
-import { Explain, Kpi, Work } from '../components/RoleUi'
+import { useLive } from '../lib/live'
+import { Kpi, Work } from '../components/RoleUi'
+import { fold, Search, StatusFilter, useSort } from '../components/TableSort'
+import { useState } from 'react'
 
 interface DealRow {
   id: number; number: string; counterparty: string; inn: string | null
@@ -18,20 +21,44 @@ interface View {
   checks: {
     withoutInn: string[]
     overduePayments: { number: string; counterparty: string; debt: number; lateDays: number }[]
-    withoutEsf: string[]
+    withoutEsf: { number: string; counterparty: string; amountTotal: number }[]
   }
   deals: DealRow[]
 }
 
 export default function Realizatsiya() {
   const nav = useNavigate()
-  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/realizatsiya'), [], 15000)
+  const { data, loading, error, reload } = useAsync<View>(
+    () => api.get('/api/view/realizatsiya'), [], 60000)
+
+  // Tugagan shartnomalar davom etayotganlaridan ajratilsin.
+  const [filter, setFilter] = useState<'open' | 'closed' | 'all'>('open')
+
+  // Qidiruv: MChJ nomi, shartnoma raqami yoki INN bo'yicha.
+  const [q, setQ] = useState('')
+
+  const all = data?.deals ?? []
+  const needle = fold(q)
+  const shown = all
+    .filter(d => filter === 'all' ? true
+      : filter === 'closed' ? d.status === 'Closed' : d.status !== 'Closed')
+    .filter(d => !needle
+      || fold(d.counterparty).includes(needle)
+      || fold(d.number).includes(needle)
+      || (d.inn ?? '').includes(needle))
+
+  // Sukut bo'yicha eng katta qarz yuqorida — ko'z birinchi shunga tushsin.
+  const { rows: deals, th, mark } = useSort(shown, 'debt')
+
+  // Jonli oqim: server yangi xabar chiqarishi bilan ekran yangilanadi.
+  // 60 soniyalik so'rov — zaxira, aloqa uzilib qolgan holat uchun.
+  useLive(() => reload())
 
   if (loading) return <Loading />
   if (error) return <ErrorBox text={error} />
   if (!data) return null
 
-  const { summary: s, checks: c, deals } = data
+  const { summary: s, checks: c } = data
 
   // «Sizning ishingiz» — hamma tekshiruv bitta ro'yxatga yig'iladi,
   // eng shoshilinchi yuqorida.
@@ -47,51 +74,61 @@ export default function Realizatsiya() {
       key: 'inn' + n, text: `${n} — kontragentda INN yo'q`,
       sub: 'Didox INN siz faktura qabul qilmaydi',
     })),
-    ...c.withoutEsf.map(n => ({
-      key: 'esf' + n, text: `${n} — schyot-faktura chiqarilmagan`,
-      sub: 'Sotuv rasmiylashmagan',
+    // Qatorda MChJ nomi va summa bo'lsin: faqat shartnoma raqami
+    // yozilganda ro'yxatdagi hamma qator bir xil ko'rinardi.
+    ...c.withoutEsf.map(e => ({
+      key: 'esf' + e.number,
+      text: `${e.counterparty} — schyot-faktura chiqarilmagan`,
+      sub: `${e.number} · tovar berilgan, sotuv hali rasmiylashmagan`,
+      right: money(e.amountTotal),
     })),
   ]
 
   return (
     <>
-      <Explain mark="R" title="Realizatsiya buxgalteriyasi"
-        can={['Sotuv bitimlari', 'Faktura va TTN nazorati', 'INN tekshiruvi',
-              'QQS', 'Tushgan pul', 'Debitor qarzdorlik']}>
-        Bu ekran bitta savolga javob beradi: <b>nima sotdik, kimga, qancha summaga
-        va puli keldimi.</b> Faqat sotuv bitimlari ko'rinadi — xarid boshqa
-        buxgalterning ishi. Quyidagi «Tekshirish kerak» ro'yxati sizning kunlik
-        ish rejangiz: har qatorni hal qilsangiz ro'yxat qisqaradi.
-      </Explain>
 
       <div className="kpis">
-        <Kpi label="Sotildi" value={money(s.soldTotal)} note={`${s.openDeals} ochiq bitim`} />
-        <Kpi label="Pul tushdi" value={money(s.receivedTotal)} tone="ok" note="30 kun ichida" />
-        <Kpi label="Bizga qarzdor" value={money(s.receivable)}
-          tone={s.receivable > 0 ? 'warn' : 'ok'} note="to'lanmagan qoldiq" />
-        <Kpi label="QQS" value={money(s.vatTotal)} note="soliqqa tegishli" />
-        <Kpi label="Yopilgan" value={s.closedDeals} tone="ok" note="hujjatlari to'liq" />
+        <Kpi label="Jami sotuv summasi" value={money(s.soldTotal)} note={`${s.openDeals} davom etayotgan shartnoma`} />
+        <Kpi label="Bizga tushgan pul" value={money(s.receivedTotal)} tone="ok" note="30 kun ichida" />
+        <Kpi label="Klientlar bizga qarzdor" value={money(s.receivable)}
+          tone={s.receivable > 0 ? 'warn' : 'ok'} note="hali olinmagan pul" />
+        <Kpi label="Sotuvdan QQS" value={money(s.vatTotal)} note="sotuv bo'yicha hisoblangan QQS" />
+        <Kpi label="Tugagan shartnomalar" value={s.closedDeals} tone="ok" note="hujjatlari to'liq yig'ilgan" />
       </div>
 
-      <Work title="Tekshirish kerak" empty="Hamma sotuv hujjati joyida — tekshiriladigan narsa yo'q"
+      <Work title="Tekshirilishi kerak bo'lgan shartnomalar" empty="Hamma sotuv hujjati joyida"
         items={work} />
 
       <div className="card">
         <div className="card-h">
-          <h2>Sotuv bitimlari</h2>
-          <span className="hint">qatorni bosing — to'liq kartochka ochiladi</span>
+          <h2>Sotuv shartnomalari</h2>
+          <div className="r">
+            <Search value={q} onChange={setQ} />
+            <StatusFilter value={filter} onChange={setFilter} counts={{
+              open: all.filter(d => d.status !== 'Closed').length,
+              closed: all.filter(d => d.status === 'Closed').length,
+            }} />
+          </div>
         </div>
         <div className="tw">
           <table>
             <thead>
               <tr>
-                <th>Shartnoma</th><th>Kimga sotildi</th><th>INN</th>
-                <th className="r">Summa</th><th className="r">Tushdi</th><th className="r">Qarz</th>
-                <th>Hujjatlar</th><th>Holat</th>
+                <th {...th('number')}>Shartnoma raqami{mark('number')}</th>
+                <th {...th('counterparty')}>Kimga sotildi (MChJ){mark('counterparty')}</th>
+                <th>INN</th>
+                <th {...th('amountTotal')} className={th('amountTotal').className + ' r'}>Shartnoma summasi{mark('amountTotal')}</th>
+                <th {...th('amountPaid')} className={th('amountPaid').className + ' r'}>Bizga tushgan{mark('amountPaid')}</th>
+                <th {...th('debt')} className={th('debt').className + ' r'}>Qolgan qarz{mark('debt')}</th>
+                <th>Hujjatlari bormi</th>
+                <th {...th('status')}>Shartnoma holati{mark('status')}</th>
               </tr>
             </thead>
             <tbody>
-              {deals.length === 0 && <tr><td colSpan={8} className="empty">Sotuv bitimi yo'q</td></tr>}
+              {deals.length === 0 && <tr><td colSpan={8} className="empty">
+                {q ? `«${q}» topilmadi`
+                  : filter === 'closed' ? 'Tugagan shartnoma yo\'q' : 'Davom etayotgan sotuv shartnomasi yo\'q'}
+              </td></tr>}
               {deals.map(d => (
                 <tr key={d.id} className="click" tabIndex={0}
                   onClick={() => nav(`/deals/${d.id}`)}
@@ -112,13 +149,13 @@ export default function Realizatsiya() {
                   }}>{money(d.debt)}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <span className={'pill ' + (d.hasTtn ? 'ok' : 'neut')} title="TTN">TTN</span>
-                      <span className={'pill ' + (d.hasEsf ? 'ok' : 'neut')} title="Schyot-faktura">ESF</span>
+                      <span className={'pill ' + (d.hasTtn ? 'ok' : 'off')} title="TTN">TTN</span>
+                      <span className={'pill ' + (d.hasEsf ? 'ok' : 'off')} title="Schyot-faktura">ESF</span>
                     </div>
                   </td>
                   <td>
                     <span className={'pill ' + (d.status === 'Closed' ? 'ok' : 'warn')}>
-                      {d.status === 'Closed' ? 'Yopildi' : 'Ochiq'}
+                      {d.status === 'Closed' ? 'Tugagan' : 'Davom etyapti'}
                     </span>
                   </td>
                 </tr>

@@ -23,7 +23,7 @@ public static class RoleDashboardEndpoints
 {
     public static void MapRoleDashboardEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/view").WithTags("Rol ekranlari").RequireAuthorization();
+        var g = app.MapGroup("/api/view").WithTags("Rol ekranlari").RequireAuthorization().RequireRateLimiting("api");
 
         // ══════════════════════════════════════════════════════════
         //  REALIZATSIYA — sotuv buxgalteri
@@ -104,8 +104,12 @@ public static class RoleDashboardEndpoints
                 {
                     withoutInn = noInn,
                     overduePayments = overdue,
+                    // Faqat raqam yetarli emas edi: ro'yxatdagi 13 qator
+                    // bir xil ko'rinardi va bugalter kimga tegishli ekanini
+                    // bilish uchun har birini ochib ko'rishga majbur edi.
                     withoutEsf = rows.Where(r => r.Status == "Active" && !r.HasEsf)
-                                     .Select(r => r.Number).Take(20).ToList(),
+                                     .Select(r => new { r.Number, r.Counterparty, r.AmountTotal })
+                                     .Take(20).ToList(),
                 },
                 deals = rows,
             });

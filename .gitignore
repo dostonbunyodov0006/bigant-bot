@@ -15,3 +15,4 @@ appsettings.Production.json
 storage/
 .vs/
 .idea/
+src/Bigant.Api/wwwroot/

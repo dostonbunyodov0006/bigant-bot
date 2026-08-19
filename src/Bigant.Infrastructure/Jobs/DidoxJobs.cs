@@ -1,3 +1,4 @@
+using Bigant.Domain;
 using Bigant.Didox;
 using Bigant.Domain.Entities;
 using Bigant.Domain.Enums;
@@ -8,113 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Bigant.Infrastructure.Jobs;
-
-/// <summary>
-/// CHIQUVCHI NAVBAT. Didox o'chiq bo'lsa ham ishlaydi —
-/// NullDidoxClient hujjatni lokal "yuborilgan" deb belgilaydi va cheklist yopiladi.
-/// </summary>
-public sealed class OutboxJob
-{
-    private readonly AppDbContext _db;
-    private readonly IDidoxClient _didox;
-    private readonly INotificationService _notify;
-    private readonly DidoxOptions _opt;
-    private readonly ILogger<OutboxJob> _log;
-
-    public OutboxJob(AppDbContext db, IDidoxClient didox, INotificationService notify,
-                     IOptions<DidoxOptions> opt, ILogger<OutboxJob> log)
-    {
-        _db = db; _didox = didox; _notify = notify; _opt = opt.Value; _log = log;
-    }
-
-    public async Task RunAsync(CancellationToken ct = default)
-    {
-        var now = DateTimeOffset.UtcNow;
-
-        var batch = await _db.Outbox
-            .Include(o => o.Document).ThenInclude(d => d!.Counterparty)
-            .Where(o => o.SentAt == null && o.NextTryAt <= now && o.Attempts < _opt.MaxSendAttempts)
-            .OrderBy(o => o.Id)
-            .Take(50)
-            .ToListAsync(ct);
-
-        foreach (var item in batch)
-        {
-            var doc = item.Document;
-            item.Attempts++;
-
-            var outgoing = new DidoxOutgoingDocument(
-                MapKind(doc.DocType),
-                doc.DocNumber ?? doc.Id.ToString(),
-                doc.DocDate,
-                doc.Counterparty?.Inn,
-                doc.Payload.RootElement.GetRawText(),
-                doc.SignedData);
-
-            var result = await _didox.SendAsync(outgoing, item.IdempotencyKey, ct);
-
-            if (result.Success)
-            {
-                doc.DidoxId = result.DidoxId;
-                doc.Status = DocStatus.Sent;
-                doc.SentAt = DateTimeOffset.UtcNow;
-                doc.UpdatedAt = DateTimeOffset.UtcNow;
-                item.SentAt = DateTimeOffset.UtcNow;
-                item.LastError = null;
-
-                await CloseStepAsync(doc, ct);
-            }
-            else
-            {
-                item.LastError = $"{result.ErrorCode}: {result.ErrorMessage}";
-                // Eksponensial kechikish: 1, 2, 4, 8... daqiqa (maks 2 soat).
-                var delay = TimeSpan.FromMinutes(Math.Min(120, Math.Pow(2, item.Attempts)));
-                item.NextTryAt = DateTimeOffset.UtcNow.Add(delay);
-
-                _log.LogWarning("Hujjat {Doc} yuborilmadi ({Attempt}-urinish): {Err}",
-                    doc.DocNumber, item.Attempts, item.LastError);
-
-                if (item.Attempts >= _opt.MaxSendAttempts)
-                {
-                    await _notify.RaiseAsync(new Notification
-                    {
-                        Kind = NotificationKind.DocumentRejected,
-                        Severity = NotificationSeverity.Critical,
-                        DealId = doc.DealId,
-                        DocumentId = doc.Id,
-                        Title = $"Hujjat yuborilmadi: {doc.DocNumber}",
-                        Body = $"{_opt.MaxSendAttempts} marta urinildi. Xato: {item.LastError}",
-                        DedupKey = $"SendFailed:doc:{doc.Id}"
-                    }, ct);
-                }
-            }
-        }
-
-        if (batch.Count > 0) await _db.SaveChangesAsync(ct);
-    }
-
-    private async Task CloseStepAsync(Document doc, CancellationToken ct)
-    {
-        if (doc.DealId is not { } dealId) return;
-        if (DealWorkflow.StepForDocument(doc.DocType) is not { } stepType) return;
-
-        var step = await _db.DealSteps.FirstOrDefaultAsync(s => s.DealId == dealId && s.Step == stepType, ct);
-        if (step is not { Status: StepStatus.Pending }) return;
-
-        step.Status = StepStatus.Done;
-        step.CompletedAt = DateTimeOffset.UtcNow;
-        step.DocumentId = doc.Id;
-    }
-
-    private static DidoxDocKind MapKind(DocType t) => t switch
-    {
-        DocType.Esf         => DidoxDocKind.Esf,
-        DocType.Ttn         => DidoxDocKind.Ttn,
-        DocType.Doverennost => DidoxDocKind.Doverennost,
-        DocType.Contract    => DidoxDocKind.Contract,
-        _ => DidoxDocKind.Act
-    };
-}
 
 /// <summary>
 /// KIRUVCHI HUJJATLARNI TORTISH. Didox o'chiq bo'lsa hech narsa qilmaydi
@@ -133,6 +27,14 @@ public sealed class InboxJob
         _didox = didox; _inbox = inbox; _notify = notify; _log = log;
     }
 
+    /// <summary>
+    /// Ketma-ket nechta marta xato bo'lganda ogohlantirish yuboriladi.
+    /// Bitta uzilish tarmoqning o'tkinchi nosozligi bo'lishi mumkin —
+    /// har mayda xatoda bezovta qilmaymiz.
+    /// </summary>
+    private const int FailuresBeforeAlarm = 3;
+    private static int _consecutiveFailures;
+
     public async Task RunAsync(CancellationToken ct = default)
     {
         if (!_didox.IsEnabled) return;
@@ -140,22 +42,77 @@ public sealed class InboxJob
         // 3 kunlik oyna — dublikat DidoxId indeksi bilan to'siladi.
         var since = DateTimeOffset.UtcNow.AddDays(-3);
 
-        // IKKALA YO'NALISH ham tortiladi:
-        //   inbox  — postavshik/klient bizga yuborgani
-        //   outbox — bugalter Didox'da yaratib YUBORGANI
-        // Busiz «dogovor tashlandimi?» degan savolga javob bo'lmaydi.
-        var incoming = await _didox.PullInboxAsync(since, ct);
-        var outgoing = await _didox.PullOutboxAsync(since, ct);
-        var added = 0;
+        IReadOnlyList<DidoxInboxItem> incoming, outgoing;
+        try
+        {
+            // IKKALA YO'NALISH ham tortiladi:
+            //   inbox  — postavshik/klient bizga yuborgani
+            //   outbox — bugalter Didox'da yaratib YUBORGANI
+            // Busiz «dogovor tashlandimi?» degan savolga javob bo'lmaydi.
+            incoming = await _didox.PullInboxAsync(since, ct);
+            outgoing = await _didox.PullOutboxAsync(since, ct);
+        }
+        catch (Exception ex)
+        {
+            // XAVFLI HOLAT: Didox javob bermasa xabarlar JIMGINA to'xtaydi.
+            // Bugalter «hujjat yo'q» deb o'ylaydi, aslida aloqa uzilgan.
+            // Shuning uchun adminni ogohlantiramiz.
+            _consecutiveFailures++;
+            _log.LogError(ex, "Didox javob bermadi ({N}-marta ketma-ket)", _consecutiveFailures);
 
+            if (_consecutiveFailures == FailuresBeforeAlarm)
+            {
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.IntegrationDown,
+                    TargetRole = UserRole.Admin,
+                    Severity = NotificationSeverity.Critical,
+                    Title = "\U0001F534 DIDOX ALOQASI UZILDI",
+                    Body = $"Didox {FailuresBeforeAlarm} marta ketma-ket javob bermadi.\n\n" +
+                           $"Xato: {ex.Message}\n\n" +
+                           "⚠️ Yangi hujjatlar KELMAYAPTI.\n" +
+                           "Didox sozlamalari va internet aloqasini tekshiring.",
+                    DedupKey = $"DidoxDown:{UzTime.Today:yyyy-MM-dd}:{_consecutiveFailures / 20}"
+                }, ct);
+                await _notify.PushPendingAsync(ct);
+            }
+            return;   // xizmat qulamaydi, keyingi urinishda qayta uriniladi
+        }
+
+        // Aloqa tiklandi — agar ilgari uzilgan bo'lsa, xabar beramiz.
+        if (_consecutiveFailures >= FailuresBeforeAlarm)
+        {
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.IntegrationDown,
+                TargetRole = UserRole.Admin,
+                Severity = NotificationSeverity.Info,
+                Title = "✅ DIDOX ALOQASI TIKLANDI",
+                Body = "Didox yana javob bermoqda. Hujjatlar qayta kela boshladi.",
+                DedupKey = $"DidoxUp:{DateTimeOffset.UtcNow:yyyy-MM-dd-HH}"
+            }, ct);
+        }
+        _consecutiveFailures = 0;
+
+        var added = 0;
         foreach (var (i, dir) in incoming.Select(x => (x, DocDirection.In))
                         .Concat(outgoing.Select(x => (x, DocDirection.Out))))
         {
-            var doc = await _inbox.RegisterAsync(new IncomingDocument(
-                MapType(i.Kind), i.DidoxId, i.DocNumber, i.DocDate,
-                i.SenderInn, i.SenderName, i.Amount ?? 0m, i.VatAmount ?? 0m, i.RawJson,
-                Direction: dir), ct);
-            if (doc is not null) added++;
+            try
+            {
+                var doc = await _inbox.RegisterAsync(new IncomingDocument(
+                    MapType(i.Kind), i.DidoxId, i.DocNumber, i.DocDate,
+                    i.SenderInn, i.SenderName, i.Amount ?? 0m, i.VatAmount ?? 0m, i.RawJson,
+                    Direction: dir), ct);
+                if (doc is not null) added++;
+            }
+            catch (Exception ex)
+            {
+                // BITTA hujjat xato bersa qolganlari baribir kirsin.
+                // Aks holda bitta buzuq yozuv butun oqimni to'xtatib qo'yardi.
+                _log.LogError(ex, "Didox hujjatini ro'yxatga olib bo'lmadi: {Id} №{No}",
+                    i.DidoxId, i.DocNumber);
+            }
         }
 
         if (added > 0)
@@ -174,77 +131,4 @@ public sealed class InboxJob
         DidoxDocKind.Contract    => DocType.Contract,
         _ => DocType.Act
     };
-}
-
-/// <summary>Yuborilgan hujjatlar holatini yangilaydi (qabul qilindimi / rad etildimi).</summary>
-public sealed class StatusSyncJob
-{
-    private readonly AppDbContext _db;
-    private readonly IDidoxClient _didox;
-    private readonly INotificationService _notify;
-
-    public StatusSyncJob(AppDbContext db, IDidoxClient didox, INotificationService notify)
-    {
-        _db = db; _didox = didox; _notify = notify;
-    }
-
-    public async Task RunAsync(CancellationToken ct = default)
-    {
-        if (!_didox.IsEnabled) return;
-
-        var pending = await _db.Documents
-            .Where(d => d.DidoxId != null &&
-                       (d.Status == DocStatus.Sent || d.Status == DocStatus.Delivered))
-            .OrderBy(d => d.UpdatedAt)
-            .Take(100)
-            .ToListAsync(ct);
-
-        foreach (var doc in pending)
-        {
-            var st = await _didox.GetStatusAsync(doc.DidoxId!, ct);
-            var newStatus = st.State switch
-            {
-                DidoxDocState.Delivered => DocStatus.Delivered,
-                DidoxDocState.Accepted  => DocStatus.Accepted,
-                DidoxDocState.Rejected  => DocStatus.Rejected,
-                DidoxDocState.Cancelled => DocStatus.Cancelled,
-                _ => doc.Status
-            };
-
-            if (newStatus == doc.Status) continue;
-
-            doc.Status = newStatus;
-            doc.RejectReason = st.RejectReason;
-            doc.UpdatedAt = DateTimeOffset.UtcNow;
-
-            if (newStatus == DocStatus.Accepted && doc.DocType == DocType.Esf && doc.DealId is { } dealId)
-            {
-                var step = await _db.DealSteps
-                    .FirstOrDefaultAsync(s => s.DealId == dealId && s.Step == StepType.EsfAccepted, ct);
-                if (step is { Status: StepStatus.Pending })
-                {
-                    step.Status = StepStatus.Done;
-                    step.CompletedAt = DateTimeOffset.UtcNow;
-                    step.DocumentId = doc.Id;
-                }
-            }
-
-            if (newStatus == DocStatus.Rejected)
-            {
-                await _notify.RaiseAsync(new Notification
-                {
-                    Kind = NotificationKind.DocumentRejected,
-                    Severity = NotificationSeverity.Critical,
-                    DealId = doc.DealId,
-                    DocumentId = doc.Id,
-                    Title = $"Hujjat rad etildi: {doc.DocNumber}",
-                    Body = st.RejectReason ?? "Sabab ko'rsatilmagan",
-                    DedupKey = $"Rejected:doc:{doc.Id}"
-                }, ct);
-            }
-        }
-
-        if (pending.Count > 0) await _db.SaveChangesAsync(ct);
-        await _notify.PushPendingAsync(ct);
-    }
 }

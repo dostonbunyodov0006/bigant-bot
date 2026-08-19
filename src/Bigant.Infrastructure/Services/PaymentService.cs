@@ -176,16 +176,70 @@ public sealed partial class PaymentService : IPaymentService
 
         // Bir qarashda o'qiladigan ko'rinish: kim, qancha edi, qancha berildi,
         // qancha qoldi. Raqamlar ustma-ust turadi.
+        // Shu safar qancha o'tkazilgani alohida ko'rsatiladi. Faqat «jami»
+        // bo'lsa, bugalter oxirgi to'lov o'tdimi yoki yo'qmi bilolmaydi.
+        var lastAmount = deal.Payments.OrderByDescending(x => x.Id)
+                                      .Select(x => (decimal?)x.Amount)
+                                      .FirstOrDefault();
+
+        // «so'm» har qatorda turadi: hujjat xabarlarida ham shunday, bugalter
+        // ikki xil ko'rinish orasida chalkashmasin.
         var body =
+            // Shartnoma raqami sarlavhada bor — bu yerda takrorlanmaydi.
             $"Kontragent: {cpName}\n\n" +
-            $"Shartnoma:  {deal.AmountTotal:N0}\n" +
-            (buy ? $"O'tkazdik:  {deal.AmountPaid:N0}\n"
-                 : $"Tushdi:     {deal.AmountPaid:N0}\n") +
+            $"Bitim summasi:  {deal.AmountTotal:N0} so'm\n" +
+            (lastAmount is { } la ? $"Bu safar:       {la:N0} so'm\n" : "") +
+            (buy ? $"Jami o'tkazdik: {deal.AmountPaid:N0} so'm\n"
+                 : $"Jami tushdi:    {deal.AmountPaid:N0} so'm\n") +
             "──────────────────\n" +
             (isFull
                 ? "✅ QARZ YO'Q"
-                : buy ? $"🔴 QOLDI TO'LASH: {debt:N0}"
-                      : $"🟢 QOLDI OLISH:  {debt:N0}");
+                : buy ? $"🔴 QOLDI TO'LASH: {debt:N0} so'm"
+                      : $"🟢 QOLDI OLISH:  {debt:N0} so'm");
+
+        // ── QARZ YOPILDI — alohida xabar, o'sha zahoti ──
+        // «To'lov qabul qilindi» va «qarz butunlay yopildi» — ikki xil xabar.
+        // Ikkinchisi yakunni bildiradi, bugalter bitimni ko'zdan chiqarishi mumkin.
+        if (isFull)
+        {
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.DebtCleared,
+                TargetRole = UserRole.Realizatsiya,
+                Severity = NotificationSeverity.Info,
+                UserId = deal.ManagerId,
+                DealId = deal.Id,
+                Title = "✅ QARZ YOPILDI",
+                Body = $"Kontragent: {cpName}\n" +
+                       $"Shartnoma:  {deal.Number}\n\n" +
+                       $"Jami: {deal.AmountTotal:N0} so'm\n" +
+                       (buy ? "Biz to'liq to'ladik." : "Bizga to'liq tushdi.") +
+                       "\nQarz qolmadi.",
+                DedupKey = $"DebtCleared:deal:{deal.Id}"
+            }, ct);
+        }
+
+        // ── ORTIQCHA TO'LOV — darhol, kiritilgan zahoti ──
+        if (deal.AmountTotal > 0 && deal.AmountPaid > deal.AmountTotal)
+        {
+            var extra = deal.AmountPaid - deal.AmountTotal;
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.Overpaid,
+                TargetRole = UserRole.Realizatsiya,
+                Severity = NotificationSeverity.Warning,
+                UserId = deal.ManagerId,
+                DealId = deal.Id,
+                Title = "\U0001F4B0 ORTIQCHA TO'LOV",
+                Body = $"Kontragent: {cpName}\n" +
+                       $"Shartnoma:  {deal.Number}\n\n" +
+                       $"Shartnoma summasi: {deal.AmountTotal:N0}\n" +
+                       $"To'langan:         {deal.AmountPaid:N0}\n" +
+                       $"⚠️ Ortiqcha:        {extra:N0}\n\n" +
+                       "Xato kiritilgan yoki avans bo'lishi mumkin — tekshiring.",
+                DedupKey = $"Overpaid:deal:{deal.Id}:{deal.AmountPaid}"
+            }, ct);
+        }
 
         await _notify.RaiseAsync(new Notification
         {
@@ -201,6 +255,10 @@ public sealed partial class PaymentService : IPaymentService
             Body = body,
             DedupKey = $"Pay:{deal.Id}:{deal.AmountPaid}"
         }, ct);
+
+        // XABARNI DARHOL YUBORAMIZ. Aks holda u bazada yotib, keyingi
+        // fon vazifasini (30 daqiqagacha) kutardi — bugalter kech bilardi.
+        await _notify.PushPendingAsync(ct);
 
         // To'liq to'langandagina cheklistdagi "To'lov" qadami yopiladi.
         if (isFull)

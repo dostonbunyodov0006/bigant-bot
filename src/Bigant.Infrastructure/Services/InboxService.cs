@@ -1,3 +1,4 @@
+using Bigant.Domain;
 using System.Text.Json;
 using Bigant.Domain.Entities;
 using Bigant.Domain.Enums;
@@ -142,12 +143,436 @@ public sealed class InboxService : IInboxService
             DedupKey = $"Incoming:doc:{doc.Id}"
         }, ct);
 
+        // ── SUMMA MOS KELMADI — darhol, hujjat kelgan zahoti ──
+        // Faktura summasi TTN yoki dogovor summasidan farq qilsa, bu yo
+        // qisman yetkazib berish, yo xato. Ikkalasi ham tekshirishga arziydi.
+        if (doc.ParentDocumentId is { } parentId && inc.Amount > 0)
+        {
+            var parent = await _db.Documents.AsNoTracking()
+                .Where(d => d.Id == parentId)
+                .Select(d => new { d.DocType, d.DocNumber, d.Amount })
+                .FirstOrDefaultAsync(ct);
+
+            if (parent is not null && parent.Amount > 0
+                && Math.Abs(parent.Amount - inc.Amount) > 1000m)
+            {
+                var diff = inc.Amount - parent.Amount;
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.AmountMismatch,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Warning,
+                    DealId = deal.Id,
+                    DocumentId = doc.Id,
+                    Title = "⚠️ SUMMA MOS KELMADI",
+                    Body = $"Kontragent: {who}\n" +
+                           $"Shartnoma:  {deal.Number}\n\n" +
+                           $"{label} №{inc.DocNumber ?? "—"}: {inc.Amount:N0}\n" +
+                           $"{DealWorkflow.DocLabel(parent.DocType)} №{parent.DocNumber}: {parent.Amount:N0}\n" +
+                           $"Farq: {(diff > 0 ? "+" : "")}{diff:N0} so'm\n\n" +
+                           "Qisman yetkazib berish yoki xato bo'lishi mumkin.",
+                    DedupKey = $"Mismatch:doc:{doc.Id}"
+                }, ct);
+            }
+        }
+
+        // ── HUJJAT KELGAN ZAHOTI QILINADIGAN TEKSHIRUVLAR ──
+        // Har biri ALOHIDA xabar chiqaradi: bitta hujjatda ikki muammo bo'lsa,
+        // ikkita xabar keladi. Aralashtirib yuborsak, bugalter ikkinchisini
+        // ko'rmay qolardi.
+        await RunDocumentChecksAsync(inc, doc, deal, who, priorChain, ct);
+
         _audit.Write(null, nameof(Document), doc.Id, "inbox",
             null, new { inc.DidoxId, inc.DocNumber, Type = inc.DocType.ToString() });
         await _db.SaveChangesAsync(ct);
 
+        // Didox'dan hujjat kelgan zahoti xabar ketsin — kutish yo'q.
+        await _notify.PushPendingAsync(ct);
+
         _log.LogInformation("Kiruvchi hujjat ro'yxatga olindi: {Type} №{Number}", inc.DocType, inc.DocNumber);
         return doc;
+    }
+
+    /// <summary>
+    /// O'zbekistonda QQS stavkasi. Faktura QQS si shu nisbatdan keskin
+    /// chetlashsa — hujjatda xato bor yoki stavka boshqacha.
+    /// </summary>
+    private const decimal VatRate = 0.12m;
+
+    /// <summary>
+    /// Hujjat kelgan zahoti bajariladigan yettita tekshiruv.
+    ///
+    /// Hammasi Didox hujjatining O'ZIDAGI maydonlarga tayanadi — turi, raqami,
+    /// sanasi, INN, summasi, QQS va doverennost muddati. Qo'shimcha so'rov
+    /// yubormaydi, shuning uchun hujjat kelishini sekinlashtirmaydi.
+    ///
+    /// Har biri alohida xabar chiqaradi va o'z roliga yo'naltiriladi.
+    /// </summary>
+    private async Task RunDocumentChecksAsync(
+        IncomingDocument inc, Document doc, Deal deal, string who,
+        IReadOnlyList<(DocType DocType, long Id)> prior, CancellationToken ct)
+    {
+        var docLabel = DealWorkflow.DocLabel(inc.DocType);
+        var no = inc.DocNumber ?? "—";
+        var head = $"Kontragent: {who}\nHujjat:     {docLabel} №{no}\n\n";
+
+        // ── 1. TAKRORIY HUJJAT RAQAMI ──
+        // Bitta kontragent bir xil raqamni ikki marta yuborsa, bu yo qayta
+        // yuborish, yo xato. Ikkalasi ham hisobni buzadi.
+        if (!string.IsNullOrWhiteSpace(inc.DocNumber) && doc.CounterpartyId is { } cpId)
+        {
+            var twin = await _db.Documents.AsNoTracking()
+                .Where(d => d.Id != doc.Id
+                         && d.CounterpartyId == cpId
+                         && d.DocType == inc.DocType
+                         && d.DocNumber == inc.DocNumber)
+                .Select(d => new { d.Id, d.DocDate })
+                .FirstOrDefaultAsync(ct);
+
+            if (twin is not null)
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.DuplicateDocNumber,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Warning,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "🔁 BIR XIL RAQAMLI HUJJAT",
+                    Body = head +
+                           $"Shu raqamli hujjat allaqachon bor.\n" +
+                           $"Eskisining sanasi: {twin.DocDate:dd.MM.yyyy}\n" +
+                           $"Yangisining sanasi: {inc.DocDate:dd.MM.yyyy}\n\n" +
+                           "Qayta yuborilgan yoki raqam xato bo'lishi mumkin.",
+                    DedupKey = $"DupNo:doc:{doc.Id}"
+                }, ct);
+        }
+
+        // ── 2. INN MOS EMAS ──
+        // Hujjatdagi INN bitimdagi kontragentnikidan farq qilsa, hujjat
+        // boshqa bitimga tegishli bo'lishi mumkin.
+        if (!string.IsNullOrWhiteSpace(inc.SenderInn))
+        {
+            var dealInn = await _db.Counterparties.AsNoTracking()
+                .Where(c => c.Id == deal.CounterpartyId)
+                .Select(c => c.Inn)
+                .FirstOrDefaultAsync(ct);
+
+            if (!string.IsNullOrWhiteSpace(dealInn) && dealInn != inc.SenderInn)
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.InnMismatch,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Critical,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "⚠️ INN MOS KELMADI",
+                    Body = head +
+                           $"Hujjatdagi INN:  {inc.SenderInn}\n" +
+                           $"Bitimdagi INN:   {dealInn}\n\n" +
+                           "Hujjat boshqa shartnomaga tegishli bo'lishi mumkin — tekshiring.",
+                    DedupKey = $"InnMismatch:doc:{doc.Id}"
+                }, ct);
+        }
+
+        // ── 3. ESKI SANALI HUJJAT ──
+        // Sanasi kelgan kunidan 30 kundan ko'proq oldin bo'lsa, hujjat
+        // kechikkan. Oy yopilgandan keyin kelgan faktura hisobni buzadi.
+        var lateDays = UzTime.Today.DayNumber - inc.DocDate.DayNumber;
+        if (lateDays > 30)
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.BackdatedDocument,
+                TargetRole = UserRole.Perehod,
+                Severity = NotificationSeverity.Warning,
+                DealId = deal.Id, DocumentId = doc.Id,
+                Title = "📅 ESKI SANALI HUJJAT",
+                Body = head +
+                       $"Hujjat sanasi: {inc.DocDate:dd.MM.yyyy}\n" +
+                       $"Bugun keldi:   {UzTime.Today:dd.MM.yyyy}\n" +
+                       $"Kechikish:     {lateDays} kun\n\n" +
+                       "Oy yopilgan bo'lsa, hisobotni qayta ko'rish kerak.",
+                DedupKey = $"Backdated:doc:{doc.Id}"
+            }, ct);
+
+        // ── 4-5. QQS TEKSHIRUVI (faqat fakturada) ──
+        if (inc.DocType == DocType.Esf && inc.Amount > 0)
+        {
+            // QQS SIZ FAKTURA HAR DOIM XATO EMAS.
+            // Kontragent soddalashtirilgan soliqda bo'lsa, u umuman QQS
+            // ko'rsatmaydi va har fakturada ogohlantirish chiqarish — quruq
+            // shovqin. Shuning uchun faqat SHU bitimda ilgari QQS bo'lgan
+            // bo'lsa ogohlantiramiz: ya'ni kutilgan, lekin kelmagan.
+            var vatExpected = await _db.Documents.AsNoTracking()
+                .AnyAsync(d => d.DealId == deal.Id && d.Id != doc.Id && d.VatAmount > 0, ct);
+
+            if (inc.VatAmount <= 0)
+            {
+                // Butunlay QQS siz ishlaydigan kontragent — jim o'tamiz.
+                if (vatExpected)
+                    await _notify.RaiseAsync(new Notification
+                    {
+                        Kind = NotificationKind.VatMissing,
+                        TargetRole = UserRole.Realizatsiya,
+                        Severity = NotificationSeverity.Warning,
+                        DealId = deal.Id, DocumentId = doc.Id,
+                        Title = "🧾 FAKTURADA QQS YO'Q",
+                        Body = head +
+                               $"Summa: {inc.Amount:N0} so'm\n" +
+                               "QQS:   0\n\n" +
+                               "Shu shartnoma bo'yicha oldingi hujjatlarda QQS bor edi.\n" +
+                               // Kimning fakturasi ekani muhim: kelganini qaytartiramiz,
+                               // o'zimiznikini esa o'zimiz tuzatamiz.
+                               (inc.Direction == DocDirection.In
+                                   ? "QQS ni hisobga ola olmaymiz — fakturani qaytartiring."
+                                   : "Biz QQS siz faktura chiqardik — Didox'da tekshiring."),
+                        DedupKey = $"VatMissing:doc:{doc.Id}"
+                    }, ct);
+            }
+            else
+            {
+                // QQS odatda summaning ichida: soliqsiz baza × 12%.
+                // Kutilganidan 5% dan ko'p chetlashsa — e'tibor beriladi.
+                var expected = inc.Amount / (1 + VatRate) * VatRate;
+                var drift = expected == 0 ? 0 : Math.Abs(inc.VatAmount - expected) / expected;
+
+                if (drift > 0.05m)
+                    await _notify.RaiseAsync(new Notification
+                    {
+                        Kind = NotificationKind.VatSuspicious,
+                        TargetRole = UserRole.Realizatsiya,
+                        Severity = NotificationSeverity.Warning,
+                        DealId = deal.Id, DocumentId = doc.Id,
+                        Title = "🧮 QQS SUMMASI SHUBHALI",
+                        Body = head +
+                               $"Summa:        {inc.Amount:N0} so'm\n" +
+                               $"Fakturadagi QQS: {inc.VatAmount:N0} so'm\n" +
+                               $"12% bo'yicha:    {expected:N0} so'm\n\n" +
+                               "Stavka boshqacha yoki hujjatda xato bo'lishi mumkin.",
+                        DedupKey = $"VatOdd:doc:{doc.Id}"
+                    }, ct);
+            }
+        }
+
+        // ── 6. MUDDATI O'TGAN DOVERENNOST ──
+        if (inc.DocType == DocType.Doverennost)
+        {
+            var until = await _db.Doverennosti.AsNoTracking()
+                .Where(x => x.DocumentId == doc.Id)
+                .Select(x => x.ValidUntil)
+                .FirstOrDefaultAsync(ct);
+
+            if (until is { } u && u < UzTime.Today)
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.DoverennostExpired,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Critical,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "⛔ DOVERENNOST MUDDATI O'TGAN",
+                    Body = head +
+                           $"Muddati tugagan: {u:dd.MM.yyyy}\n" +
+                           $"Bugun:           {UzTime.Today:dd.MM.yyyy}\n\n" +
+                           "Bunday doverennost bo'yicha tovar chiqarib bo'lmaydi.",
+                    DedupKey = $"DovExpired:doc:{doc.Id}"
+                }, ct);
+        }
+
+        // ── 7. ZANJIR TARTIBI BUZILDI ──
+        // Faktura yoki TTN doverennostdan OLDIN kelgan bo'lsa, bu tartib
+        // buzilishi: qaysi asosda tovar berilgani noaniq bo'lib qoladi.
+        if (inc.DocType is DocType.Esf or DocType.Ttn
+            && deal.Kind == DealKind.Purchase
+            && !prior.Any(p => p.DocType == DocType.Doverennost))
+        {
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.ChainOutOfOrder,
+                TargetRole = UserRole.Perehod,
+                Severity = NotificationSeverity.Warning,
+                DealId = deal.Id, DocumentId = doc.Id,
+                Title = "🔀 TARTIB BUZILDI",
+                Body = head +
+                       $"{docLabel} keldi, lekin doverennost hali yo'q.\n\n" +
+                       "To'g'ri tartib: dogovor → doverennost → TTN → faktura.\n" +
+                       "Doverennost chiqarilganmi — tekshiring.",
+                DedupKey = $"OutOfOrder:doc:{doc.Id}"
+            }, ct);
+        }
+
+        // ── 8. HUJJAT RAQAMSIZ ──
+        // Raqamsiz hujjatni keyin topib bo'lmaydi va soliqda ko'rsatib bo'lmaydi.
+        if (string.IsNullOrWhiteSpace(inc.DocNumber))
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.DocumentWithoutNumber,
+                TargetRole = UserRole.Perehod,
+                Severity = NotificationSeverity.Warning,
+                DealId = deal.Id, DocumentId = doc.Id,
+                Title = "🔢 HUJJAT RAQAMSIZ KELDI",
+                Body = $"Kontragent: {who}\n" +
+                       $"Hujjat turi: {docLabel}\n" +
+                       $"Sana: {inc.DocDate:dd.MM.yyyy}\n" +
+                       $"Summa: {inc.Amount:N0} so'm\n\n" +
+                       "Raqamsiz hujjatni keyinchalik topib bo'lmaydi.\n" +
+                       "Kontragentdan raqamini so'rang.",
+                DedupKey = $"NoNumber:doc:{doc.Id}"
+            }, ct);
+
+        // ── 9. SUMMA NOL ──
+        // Pul hujjatida summa bo'lmasa — hisobga olib bo'lmaydi.
+        if (inc.Amount <= 0 && inc.DocType is DocType.Contract or DocType.Esf
+                                           or DocType.InvoiceForPayment)
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.DocumentWithoutAmount,
+                TargetRole = UserRole.Perehod,
+                Severity = NotificationSeverity.Warning,
+                DealId = deal.Id, DocumentId = doc.Id,
+                Title = "0️⃣ HUJJATDA SUMMA YO'Q",
+                Body = head + "Summa: 0\n\n" +
+                       "Bu turdagi hujjatda summa bo'lishi kerak —\n" +
+                       "qarz hisobiga kirmaydi.",
+                DedupKey = $"NoAmount:doc:{doc.Id}"
+            }, ct);
+
+        // ── 10. SANASI KELAJAKDA ──
+        if (inc.DocDate > UzTime.Today)
+            await _notify.RaiseAsync(new Notification
+            {
+                Kind = NotificationKind.FutureDatedDocument,
+                TargetRole = UserRole.Perehod,
+                Severity = NotificationSeverity.Warning,
+                DealId = deal.Id, DocumentId = doc.Id,
+                Title = "🔮 HUJJAT SANASI KELAJAKDA",
+                Body = head +
+                       $"Hujjat sanasi: {inc.DocDate:dd.MM.yyyy}\n" +
+                       $"Bugun:         {UzTime.Today:dd.MM.yyyy}\n\n" +
+                       "Sana xato kiritilgan bo'lishi mumkin —\n" +
+                       "hisobot noto'g'ri davrga tushadi.",
+                DedupKey = $"Future:doc:{doc.Id}"
+            }, ct);
+
+        // ── 11. DOVERENNOSTDA ISHONCHLI SHAXS YO'Q ──
+        // Ismsiz doverennost bilan tovar berilmaydi.
+        if (inc.DocType == DocType.Doverennost)
+        {
+            var agent = await _db.Doverennosti.AsNoTracking()
+                .Where(x => x.DocumentId == doc.Id)
+                .Select(x => x.EmployeeName)
+                .FirstOrDefaultAsync(ct);
+
+            // «—» — ism topilmaganda qo'yiladigan belgi, ya'ni ism YO'Q.
+            if (string.IsNullOrWhiteSpace(agent) || agent.Trim() == "—")
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.DoverennostWithoutAgent,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Critical,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "👤 DOVERENNOSTDA ISHONCHLI SHAXS YO'Q",
+                    Body = head +
+                           "Kim tovarni olishi ko'rsatilmagan.\n\n" +
+                           "Bunday doverennost bilan tovar berilmaydi —\n" +
+                           "Didox'da to'ldirilganini tekshiring.",
+                    DedupKey = $"NoAgent:doc:{doc.Id}"
+                }, ct);
+        }
+
+        // ── 12. BIR XIL INN, BOSHQA NOM ──
+        // Kontragent nomini o'zgartirgan yoki hujjatda xato bor.
+        if (!string.IsNullOrWhiteSpace(inc.SenderInn) && !string.IsNullOrWhiteSpace(inc.SenderName)
+            && doc.CounterpartyId is { } cpId2)
+        {
+            var known = await _db.Counterparties.AsNoTracking()
+                .Where(c => c.Id == cpId2).Select(c => c.Name).FirstOrDefaultAsync(ct);
+
+            if (!string.IsNullOrWhiteSpace(known)
+                && !string.Equals(known.Trim(), inc.SenderName.Trim(), StringComparison.OrdinalIgnoreCase))
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.CounterpartyNameChanged,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Info,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "🏢 KONTRAGENT NOMI O'ZGARDI",
+                    Body = $"INN: {inc.SenderInn}\n\n" +
+                           $"Bizdagi nomi:    {known}\n" +
+                           $"Hujjatdagi nomi: {inc.SenderName}\n\n" +
+                           "Tashkilot nomini o'zgartirgan bo'lishi mumkin.",
+                    DedupKey = $"NameChanged:doc:{doc.Id}"
+                }, ct);
+        }
+
+        // ── 13. BIR KUNDA BIR XIL HUJJAT ──
+        if (doc.CounterpartyId is { } cpId3 && inc.Amount > 0)
+        {
+            var twin = await _db.Documents.AsNoTracking()
+                .AnyAsync(d => d.Id != doc.Id
+                            && d.CounterpartyId == cpId3
+                            && d.DocType == inc.DocType
+                            && d.DocDate == inc.DocDate
+                            && d.Amount == inc.Amount, ct);
+
+            if (twin)
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.SameDayDuplicate,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Warning,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "👯 BIR KUNDA BIR XIL HUJJAT",
+                    Body = head +
+                           $"Sana:  {inc.DocDate:dd.MM.yyyy}\n" +
+                           $"Summa: {inc.Amount:N0} so'm\n\n" +
+                           "Shu kontragentdan xuddi shunday hujjat bugun allaqachon kelgan.\n" +
+                           "Ikki marta yuborilgan bo'lishi mumkin.",
+                    DedupKey = $"SameDay:doc:{doc.Id}"
+                }, ct);
+        }
+
+        // ── 14. BIR KUNDA JUDA KO'P HUJJAT ──
+        if (doc.CounterpartyId is { } cpId4)
+        {
+            var todayCount = await _db.Documents.AsNoTracking()
+                .CountAsync(d => d.CounterpartyId == cpId4 && d.DocDate == inc.DocDate, ct);
+
+            if (todayCount == 10)   // aynan chegaraga yetganda bir marta
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.ManyDocsFromOne,
+                    TargetRole = UserRole.Perehod,
+                    Severity = NotificationSeverity.Info,
+                    DealId = deal.Id,
+                    Title = "📚 BITTA KONTRAGENTDAN KO'P HUJJAT",
+                    Body = $"Kontragent: {who}\n\n" +
+                           $"Bugun {todayCount} ta hujjat keldi ({inc.DocDate:dd.MM.yyyy}).\n\n" +
+                           "Katta partiya bo'lishi mumkin — yoki takror yuborilgan.",
+                    DedupKey = $"ManyDocs:cp:{cpId4}:{inc.DocDate:yyyyMMdd}"
+                }, ct);
+        }
+
+        // ── 15. FAKTURALAR SHARTNOMA SUMMASIDAN OSHDI ──
+        if (inc.DocType == DocType.Esf && inc.Amount > 0)
+        {
+            var esfTotal = await _db.Documents.AsNoTracking()
+                .Where(d => d.DealId == deal.Id && d.DocType == DocType.Esf
+                         && d.Status != DocStatus.Cancelled)
+                .SumAsync(d => (decimal?)d.Amount, ct) ?? 0;
+
+            if (deal.AmountTotal > 0 && esfTotal > deal.AmountTotal + 1000m)
+                await _notify.RaiseAsync(new Notification
+                {
+                    Kind = NotificationKind.EsfOverContract,
+                    TargetRole = UserRole.Realizatsiya,
+                    Severity = NotificationSeverity.Warning,
+                    DealId = deal.Id, DocumentId = doc.Id,
+                    Title = "📈 FAKTURALAR SHARTNOMADAN OSHDI",
+                    Body = head +
+                           $"Shartnoma summasi:  {deal.AmountTotal:N0} so'm\n" +
+                           $"Fakturalar jami:    {esfTotal:N0} so'm\n" +
+                           $"Ortiqcha:           {esfTotal - deal.AmountTotal:N0} so'm\n\n" +
+                           "Qo'shimcha kelishuv bormi yoki hujjatda xatomi — tekshiring.",
+                    DedupKey = $"EsfOver:doc:{doc.Id}"
+                }, ct);
+        }
     }
 
     /// <summary>
@@ -335,6 +760,34 @@ public sealed class InboxService : IInboxService
         var body = inc.Direction == DocDirection.Out ? $"Kimga:   {who}\n" : $"Kimdan:  {who}\n";
         body += $"Hujjat:  №{inc.DocNumber ?? "—"}\n";
         if (inc.Amount > 0) body += $"Summa:   {inc.Amount:N0} so'm\n";
+
+        // QQS alohida qator bo'lib chiqadi — bugalter uni hujjatdan qidirib
+        // o'tirmasin. Nol bo'lsa ko'rsatilmaydi: bo'sh qator ma'lumot bermaydi.
+        if (inc.VatAmount > 0) body += $"QQS:     {inc.VatAmount:N0} so'm\n";
+
+        // DOVERENNOST — eng muhimi MUDDAT. Egasining talabi shu edi:
+        // muddati o'tib ketgan doverennost bo'yicha tovar chiqarib bo'lmaydi.
+        // Shu sabab xabarning o'zida ko'rinadi, keyingi eslatmani kutmasdan.
+        if (inc.DocType == DocType.Doverennost)
+        {
+            var info = await _db.Doverennosti.AsNoTracking()
+                .Where(x => x.DocumentId == doc.Id)
+                .Select(x => new { x.EmployeeName, x.ValidUntil })
+                .FirstOrDefaultAsync(ct);
+
+            if (!string.IsNullOrWhiteSpace(info?.EmployeeName))
+                body += $"Vakil:   {info!.EmployeeName}\n";
+
+            if (info?.ValidUntil is { } until)
+            {
+                var left = until.DayNumber - UzTime.Today.DayNumber;
+                var note = left < 0 ? "MUDDATI O'TGAN"
+                         : left == 0 ? "bugun tugaydi"
+                         : $"{left} kun qoldi";
+                body += $"Muddat:  {until:dd.MM.yyyy} ({note})\n";
+            }
+        }
+
         if (dovLine is not null) body += $"\n{dovLine}\n";
         else if (basis is not null) body += $"\n✅ {basis} asosida\n";
         return body + $"\nShartnoma: {deal.Number}";

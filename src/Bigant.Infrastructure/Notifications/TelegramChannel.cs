@@ -39,6 +39,7 @@ public sealed class TelegramOptions
 
     /// <summary>Uzun so'rov (long polling) bilan /start buyrug'ini tinglash.</summary>
     public bool EnablePolling { get; set; } = true;
+
 }
 
 /// <summary>
@@ -87,6 +88,33 @@ public sealed class TelegramChannel : INotificationChannel
         return _companyChat;
     }
 
+    /// <summary>
+    /// Shu xabarni shaxsan olishi kerak bo'lgan xodimlarning chat id lari.
+    ///
+    /// Kimga boradi:
+    ///  • roli mos kelgan xodimga — o'z ishi haqidagi xabar;
+    ///  • adminga — hammasi, chunki u butun tizimga javob beradi;
+    ///  • roli ko'rsatilmagan (umumiy) xabar — Telegram ulagan hammaga.
+    ///
+    /// Xabarni o'chirgan (`TelegramMuted`) va faol bo'lmagan xodim chiqarib tashlanadi.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> RoleChatsAsync(UserRole? role, CancellationToken ct)
+    {
+        using var scope = _scopes.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        var q = db.Users.AsNoTracking()
+            .Where(u => u.IsActive && !u.TelegramMuted && u.TelegramChatId != null);
+
+        // Rol shartini SO'ROVDAN OLDIN hal qilamiz. Uni `role == null ||` ko'rinishida
+        // ifodaga qo'shsak, EF uni `u.role = @role` ga aylantirib yuborardi va
+        // rolsiz (umumiy) xabar faqat adminlarga borib qolardi.
+        if (role is { } r)
+            q = q.Where(u => u.Role == UserRole.Admin || u.Role == r);
+
+        return await q.Select(u => u.TelegramChatId!).ToListAsync(ct);
+    }
+
     public async Task<bool> PushAsync(Notification n, AppUser? user, CancellationToken ct = default)
     {
         if (!_opt.Enabled || string.IsNullOrWhiteSpace(_opt.BotToken)) return false;
@@ -105,6 +133,14 @@ public sealed class TelegramChannel : INotificationChannel
         if (!string.IsNullOrWhiteSpace(user?.TelegramChatId) && user!.TelegramChatId != company)
             targets.Add(user.TelegramChatId!);
 
+        // ROLGA QARAB SHAXSIY NUSXA.
+        // Umumiy chat hammaga bir xil oqim beradi — realizatsiya perehodning
+        // ishini ham ko'radi. Shaxsan ulangan xodimga esa faqat O'Z ishi boradi.
+        // Admin istisno: u butun tizimni kuzatadi, shuning uchun hammasini oladi
+        // (dashboardda ham shunday).
+        foreach (var chat in await RoleChatsAsync(n.TargetRole, ct))
+            if (!targets.Contains(chat)) targets.Add(chat);
+
         if (targets.Count == 0) return false;
 
         var text = Render(n);
@@ -112,42 +148,52 @@ public sealed class TelegramChannel : INotificationChannel
 
         var sent = false;
         foreach (var chatId in targets)
-        {
-            object payload = keyboard is null
-                ? new { chat_id = chatId, text, parse_mode = "HTML", disable_web_page_preview = true }
-                : new { chat_id = chatId, text, parse_mode = "HTML", disable_web_page_preview = true,
-                        reply_markup = new { inline_keyboard = keyboard } };
-
-            sent |= await SendAsync("sendMessage", payload, ct);
-        }
+            foreach (var part in Split(text))
+                sent |= await SendAsync("sendMessage", new
+                {
+                    chat_id = chatId, text = part, parse_mode = "HTML",
+                    disable_web_page_preview = true
+                }, ct);
         return sent;
     }
 
     /// <summary>Ulanish tasdig'i va yordam xabarlari uchun.</summary>
-    public Task<bool> SendPlainAsync(string chatId, string html, CancellationToken ct = default)
-        => SendAsync("sendMessage", new
-        {
-            chat_id = chatId, text = html, parse_mode = "HTML", disable_web_page_preview = true
-        }, ct);
+    public async Task<bool> SendPlainAsync(string chatId, string html, CancellationToken ct = default)
+    {
+        var ok = false;
+        foreach (var part in Split(html))
+            ok |= await SendAsync("sendMessage", new
+            {
+                chat_id = chatId, text = part, parse_mode = "HTML", disable_web_page_preview = true
+            }, ct);
+        return ok;
+    }
 
     /// <summary>
     /// Doimiy tugmalar bilan yuboradi — bugalter buyruq yozib o'tirmaydi,
     /// klaviatura ustidagi tugmani bosadi.
     /// </summary>
-    public Task<bool> SendWithMenuAsync(string chatId, string html, CancellationToken ct = default)
-        => SendAsync("sendMessage", new
+    public async Task<bool> SendWithMenuAsync(string chatId, string html, CancellationToken ct = default)
+    {
+        var parts = Split(html);
+        var ok = false;
+        for (var i = 0; i < parts.Count; i++)
         {
-            chat_id = chatId,
-            text = html,
-            parse_mode = "HTML",
-            disable_web_page_preview = true,
-            reply_markup = new
-            {
-                keyboard = Menu,
-                resize_keyboard = true,
-                is_persistent = true
-            }
-        }, ct);
+            // Tugmalar faqat OXIRGI qismga — har bo'lakda takrorlanmasin.
+            var last = i == parts.Count - 1;
+            object body = last
+                ? new
+                {
+                    chat_id = chatId, text = parts[i], parse_mode = "HTML",
+                    disable_web_page_preview = true,
+                    reply_markup = new { keyboard = Menu, resize_keyboard = true, is_persistent = true }
+                }
+                : new { chat_id = chatId, text = parts[i], parse_mode = "HTML", disable_web_page_preview = true };
+
+            ok |= await SendAsync("sendMessage", body, ct);
+        }
+        return ok;
+    }
 
     /// <summary>Klaviatura tugmalari. Matni HandleAsync dagi tekshiruv bilan bir xil.</summary>
     public static readonly object[][] Menu =
@@ -155,6 +201,67 @@ public sealed class TelegramChannel : INotificationChannel
         [new { text = "\U0001F534 Qarzimiz" }, new { text = "\U0001F7E2 Qarzdorlar" }],
         [new { text = "\U0001F517 Zanjir" }, new { text = "\U0001F4CA Holat" }],
     ];
+
+    /// <summary>
+    /// Telegram xabar chegarasi. Undan uzun xabarni API RAD ETADI —
+    /// bugalter hech narsa ko'rmaydi va buni sezmaydi ham.
+    /// 4096 rasmiy chegara; 3900 — HTML teglar uchun zaxira bilan.
+    /// </summary>
+    private const int MaxMessageLength = 3900;
+
+    /// <summary>
+    /// Uzun matnni qismlarga bo'ladi. Qatorlar orasidan kesadi —
+    /// jadval o'rtasidan bo'linib ketmasin.
+    /// </summary>
+    private static List<string> Split(string html)
+    {
+        if (html.Length <= MaxMessageLength) return [html];
+
+        var parts = new List<string>();
+        var cur = new System.Text.StringBuilder();
+
+        // <pre> ichida bo'linib qolsak teg ochiq qoladi va Telegram butun
+        // bo'lakni rad etadi. Shuning uchun bo'linish joyida tegni yopamiz,
+        // keyingi bo'lakda qayta ochamiz.
+        var inPre = false;
+
+        foreach (var line in html.Split('\n'))
+        {
+            // Bitta qator ham chegaradan uzun bo'lsa — majburan kesamiz.
+            var piece = line.Length > MaxMessageLength ? line[..MaxMessageLength] : line;
+
+            if (cur.Length + piece.Length + 1 > MaxMessageLength)
+            {
+                if (inPre) cur.Append("</pre>");
+                parts.Add(cur.ToString().TrimEnd());
+                cur.Clear();
+                if (inPre) cur.Append("<pre>");
+            }
+
+            // Shu qatorda teg ochildimi yoki yopildimi — kuzatib boramiz.
+            var opens = CountOf(piece, "<pre>");
+            var closes = CountOf(piece, "</pre>");
+            if (opens > closes) inPre = true;
+            else if (closes > opens) inPre = false;
+
+            cur.Append(piece).Append('\n');
+        }
+
+        if (cur.Length > 0)
+        {
+            if (inPre) cur.Append("</pre>");
+            parts.Add(cur.ToString().TrimEnd());
+        }
+        return parts;
+    }
+
+    private static int CountOf(string s, string needle)
+    {
+        var n = 0;
+        for (var i = s.IndexOf(needle, StringComparison.Ordinal); i >= 0;
+                 i = s.IndexOf(needle, i + needle.Length, StringComparison.Ordinal)) n++;
+        return n;
+    }
 
     private async Task<bool> SendAsync(string method, object payload, CancellationToken ct)
     {

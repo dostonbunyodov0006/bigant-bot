@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, money, type DealRow } from '../lib/api'
 import { ErrorBox, Loading, Seg, useAsync } from '../lib/ui'
+import { fold } from '../components/TableSort'
 
 type KindF = 'all' | 'Sale' | 'Purchase'
 type StatusF = 'Active' | 'Closed' | 'all'
@@ -17,10 +18,11 @@ export default function Deals() {
     [kind, status],
   )
 
+  // Qidiruv bot bilan bir xil qoidada: katta-kichik harf va x/h farqi yo'q.
   const rows = useMemo(() => {
-    const s = q.trim().toLowerCase()
+    const n = fold(q)
     return (data ?? []).filter(d =>
-      !s || d.number.toLowerCase().includes(s) || d.counterparty.toLowerCase().includes(s))
+      !n || fold(d.number).includes(n) || fold(d.counterparty).includes(n))
   }, [data, q])
 
   // Filtrga tushgan bitimlar bo'yicha jami qarz — bir qarashda ko'rinsin.
@@ -30,24 +32,21 @@ export default function Deals() {
     <>
       <div className="filters">
         <Seg value={kind} onChange={setKind} options={[
-          { v: 'all', label: 'Hammasi' },
-          { v: 'Sale', label: 'Sotuv' },
-          { v: 'Purchase', label: 'Xarid' },
+          { v: 'all', label: 'Sotuv va xarid' },
+          { v: 'Sale', label: '→ Sotuv' },
+          { v: 'Purchase', label: '← Xarid' },
         ]} />
         <Seg value={status} onChange={setStatus} options={[
-          { v: 'Active', label: 'Ochiq' },
-          { v: 'Closed', label: 'Yopilgan' },
-          { v: 'all', label: 'Barchasi' },
+          { v: 'Active', label: 'Davom etayotgan shartnomalar' },
+          { v: 'Closed', label: 'Tugagan shartnomalar' },
+          { v: 'all', label: 'Barcha shartnomalar' },
         ]} />
-        <input className="inp" style={{ width: 230 }} placeholder="Raqam yoki kontragent…"
+        <input className="inp" style={{ width: 230 }} placeholder="MChJ nomi yoki shartnoma raqami…"
           value={q} onChange={e => setQ(e.target.value)} />
         <span style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
-          {rows.length} ta
+          {rows.length} ta shartnoma
           {debt > 0 && <> · qarz <b className="num" style={{ color: 'var(--crit)' }}>{money(debt)}</b></>}
         </span>
-        <button className="btn pri" style={{ marginLeft: 'auto' }} onClick={() => nav('/deals/new')}>
-          + Yangi shartnoma
-        </button>
       </div>
 
       <div className="card">
@@ -58,12 +57,12 @@ export default function Deals() {
             <table>
               <thead>
                 <tr>
-                  <th>Raqam</th><th>Tur</th><th>Kontragent</th>
-                  <th className="r">Summa</th><th className="r">Qarz</th><th>Cheklist</th><th>Holat</th>
+                  <th>Shartnoma raqami</th><th>Yo'nalish</th><th>MChJ nomi</th>
+                  <th className="r">Shartnoma summasi</th><th className="r">To'langan summa</th><th className="r">Qolgan qarz</th><th>Bajarilgan bosqich</th><th>Shartnoma holati</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 && <tr><td colSpan={7} className="empty">Shartnoma topilmadi</td></tr>}
+                {rows.length === 0 && <tr><td colSpan={8} className="empty">Shartnoma topilmadi</td></tr>}
                 {rows.map(d => {
                   const unpaid = d.amountTotal - d.amountPaid
                   const pct = d.stepsTotal ? (d.stepsDone / d.stepsTotal) * 100 : 0
@@ -72,10 +71,11 @@ export default function Deals() {
                       onClick={() => nav(`/deals/${d.id}`)}
                       onKeyDown={e => { if (e.key === 'Enter') nav(`/deals/${d.id}`) }}>
                       <td className="mono" style={{ fontWeight: 500 }}>{d.number}</td>
-                      <td><span className={'pill ' + (d.kind === 'Sale' ? 'acc' : 'neut')}>
-                        {d.kind === 'Sale' ? 'Sotuv' : 'Xarid'}</span></td>
+                      <td><span className={'pill ' + (d.kind === 'Sale' ? 'acc' : 'buy')}>
+                        {d.kind === 'Sale' ? '→ Sotuv' : '← Xarid'}</span></td>
                       <td>{d.counterparty}</td>
                       <td className="r num">{money(d.amountTotal)}</td>
+                      <td className="r num" style={{ color: d.amountPaid > 0 ? 'var(--ok)' : 'var(--ink-3)' }}>{money(d.amountPaid)}</td>
                       <td className="r num" style={{ color: unpaid > 0 ? 'var(--crit)' : 'var(--ok)', fontWeight: unpaid > 0 ? 600 : 400 }}>
                         {money(unpaid)}</td>
                       <td style={{ minWidth: 126 }}>
@@ -89,7 +89,7 @@ export default function Deals() {
                       </td>
                       <td>
                         <span className={'pill ' + (d.status === 'Closed' ? 'ok' : d.status === 'Cancelled' ? 'neut' : 'warn')}>
-                          {d.status === 'Closed' ? 'Yopildi' : d.status === 'Cancelled' ? 'Bekor' : d.status === 'Draft' ? 'Qoralama' : 'Ochiq'}
+                          {d.status === 'Closed' ? 'Tugagan' : d.status === 'Cancelled' ? 'Bekor qilingan' : d.status === 'Draft' ? 'Qoralama' : 'Davom etyapti'}
                         </span>
                       </td>
                     </tr>

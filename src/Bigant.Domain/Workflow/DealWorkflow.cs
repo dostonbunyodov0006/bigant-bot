@@ -129,6 +129,18 @@ public static class DealWorkflow
     ];
 
     /// <summary>
+    /// Zanjirda shu hujjatdan KEYIN nima kutiladi.
+    ///
+    /// Hujjat qabul qilinganda bugalter «endi nima bo'ladi» deb o'ylab
+    /// qolmasligi uchun xabarda aytiladi. Oxirgi hujjat bo'lsa null.
+    /// </summary>
+    public static DocType? NextInChain(DocType current)
+    {
+        var i = Chain.ToList().IndexOf(current);
+        return i < 0 || i + 1 >= Chain.Count ? null : Chain[i + 1];
+    }
+
+    /// <summary>
     /// <paramref name="existing"/> — bitimdagi mavjud hujjatlar (turi va id si).
     /// Bekor qilingan va rad etilganlar berilmasin.
     /// </summary>
@@ -195,7 +207,7 @@ public static class DealWorkflow
     public static string StepLabel(StepType s) => s switch
     {
         StepType.Contract          => "Dogovor",
-        StepType.InvoiceForPayment => "Schyot na oplatu",
+        StepType.InvoiceForPayment => "To'lov uchun hisob",
         StepType.Payment           => "To'lov",
         StepType.Doverennost       => "Doverennost",
         StepType.Ttn               => "TTN",
@@ -207,7 +219,7 @@ public static class DealWorkflow
     public static string DocLabel(DocType d) => d switch
     {
         DocType.Contract          => "Dogovor",
-        DocType.InvoiceForPayment => "Schyot na oplatu",
+        DocType.InvoiceForPayment => "To'lov uchun hisob",
         DocType.Doverennost       => "Doverennost",
         DocType.Ttn               => "TTN",
         DocType.Esf               => "Schyot-faktura",
@@ -250,14 +262,18 @@ public static class DealWorkflow
         var we = WeAct(kind, step, contractByUs, ttnByUs);
         var label = StepLabel(step).ToUpperInvariant();
 
+        // Sarlavhada qadam nomi allaqachon bor — bu yerda faqat KIM nima
+        // qilishi kerakligi aytiladi, aks holda bir gap ikki marta o'qiladi.
+        // Bitta qator: KIM + NIMA BO'LGANI. Ilgari belgi alohida qatorda,
+        // izoh alohida qatorda edi va ikkalasi bir narsani aytardi.
         return step switch
         {
-            StepType.Payment when we      => $"{label} — biz hali to'lamadik",
-            StepType.Payment              => $"{label} — pul hali tushmadi",
-            StepType.EsfAccepted when we  => $"{label} — biz hali qabul qilmadik",
-            StepType.EsfAccepted          => $"{label} — qarshi tomon hali qabul qilmadi",
-            _ when we                     => $"{label} — BIZ YUBORISHIMIZ KERAK, hali yuborilmadi",
-            _                             => $"{label} — ULARDAN HALI KELMADI"
+            StepType.Payment when we      => "\U0001F4E4 Biz to'laymiz — hali to'lanmadi.",
+            StepType.Payment              => "\U0001F4E5 Ular to'laydi — pul hali tushmadi.",
+            StepType.EsfAccepted when we  => "\U0001F4E4 Biz qabul qilamiz — hali qabul qilmadik.",
+            StepType.EsfAccepted          => "\U0001F4E5 Ular qabul qiladi — hali qabul qilmadi.",
+            _ when we                     => "\U0001F4E4 Biz yuboramiz — hali yuborilmadi.",
+            _                             => "\U0001F4E5 Ular yuboradi — hali kelmadi."
         };
     }
 

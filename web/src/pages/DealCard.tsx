@@ -1,16 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, dateUz, money, type DealCard, type DocType } from '../lib/api'
-import { ErrorBox, Field, Loading, Modal, errText, useAsync, useToast } from '../lib/ui'
-
-/** Cheklist qadami → chiqariladigan hujjat turi. */
-const STEP_DOC: Record<string, DocType> = {
-  Contract: 'Contract',
-  InvoiceForPayment: 'InvoiceForPayment',
-  Doverennost: 'Doverennost',
-  Ttn: 'Ttn',
-  Esf: 'Esf',
-}
+import { api, dateUz, money, type DealCard } from '../lib/api'
+import { ErrorBox, Loading, errText, useAsync, useToast } from '../lib/ui'
 
 /** Hujjatni kim chiqaradi — backenddagi qoidaning aynan nusxasi. */
 function issuer(kind: string, step: string, contractByUs = true): 'us' | 'them' {
@@ -26,7 +17,6 @@ export default function DealCardPage() {
   const nav = useNavigate()
   const toast = useToast()
   const [busy, setBusy] = useState(false)
-  const [docForm, setDocForm] = useState<DocType | null>(null)
 
   const { data: d, error, loading, reload } = useAsync(
     () => api.get<DealCard>(`/api/deals/${id}`), [id])
@@ -45,13 +35,6 @@ export default function DealCardPage() {
     finally { setBusy(false) }
   }
 
-  const completeStep = (step: string) =>
-    act(() => api.post(`/api/deals/${d.id}/steps/${step}/complete`, {}), `"${step}" bajarildi deb belgilandi`)
-
-  const createDoc = (type: DocType, extra: Record<string, unknown> = {}) =>
-    act(() => api.post('/api/documents', { dealId: d.id, docType: type, ...extra }),
-      'Hujjat shakllandi — imzoga tushdi')
-
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -63,7 +46,7 @@ export default function DealCardPage() {
           </div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          {d.status === 'Closed' && <span className="pill ok">✓ Yopilgan</span>}
+          {d.status === 'Closed' && <span className="pill ok">✓ Tugagan</span>}
           {d.status === 'Cancelled' && <span className="pill neut">Bekor qilingan</span>}
           {editable && (
             <button className="btn sm danger" disabled={busy}
@@ -79,7 +62,7 @@ export default function DealCardPage() {
         <div className="col">
           <div className="card">
             <div className="card-h">
-              <h2>Cheklist</h2>
+              <h2>Bosqichlar</h2>
               <span className="hint">{d.steps.filter(s => s.status === 'Done').length} / {d.steps.length}</span>
             </div>
             <ul className="steps">
@@ -87,7 +70,6 @@ export default function DealCardPage() {
                 const done = s.status === 'Done' || s.status === 'Skipped'
                 const isNext = nextStep?.step === s.step
                 const who = issuer(d.kind, s.step)
-                const docType = STEP_DOC[s.step]
                 return (
                   <li key={s.step}>
                     <span className={'st-ic ' + (done ? 'done' : s.isOverdue ? 'late' : isNext ? 'next' : '')}>
@@ -96,30 +78,14 @@ export default function DealCardPage() {
                     <div>
                       <div className="st-t">
                         {s.label}
-                        <span className={'who ' + who}>{who === 'us' ? 'biz' : 'ular'}</span>
-                        {!s.isRequired && <span className="pill neut">ixtiyoriy</span>}
+                        <span className={'who ' + who}>{who === 'us' ? 'Biz yuboramiz' : 'Ular yuboradi'}</span>
+                        {!s.isRequired && <span className="pill neut">majburiy emas</span>}
                       </div>
                       <div className="st-m">
                         {done ? (s.completedAt ? `bajarildi · ${dateUz(s.completedAt)}` : 'bajarildi')
                           : s.isOverdue ? `muddat o'tdi · ${dateUz(s.dueDate)}`
                           : isNext ? `navbatdagi · ${dateUz(s.dueDate)}` : 'kutilmoqda'}
                       </div>
-                      {isNext && editable && (
-                        <div className="st-act">
-                          <button className="btn sm" disabled={busy} onClick={() => completeStep(s.step)}>
-                            Bajarildi
-                          </button>
-                          {who === 'us' && docType && (
-                            <button className="btn sm" disabled={busy}
-                              onClick={() => {
-                                if (docType === 'Doverennost' || docType === 'Ttn') setDocForm(docType)
-                                else createDoc(docType)
-                              }}>
-                              Hujjat chiqarish
-                            </button>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </li>
                 )
@@ -128,19 +94,19 @@ export default function DealCardPage() {
           </div>
 
           <div className="card">
-            <div className="card-h"><h2>Ma'lumot</h2></div>
+            <div className="card-h"><h2>Shartnoma ma'lumoti</h2></div>
             <dl className="kv">
-              <dt>Tur</dt><dd>{d.kind === 'Sale' ? 'Sotuv (biz sotamiz)' : 'Xarid (biz olamiz)'}</dd>
-              <dt>Kontragent</dt><dd>{d.counterparty.name}</dd>
+              <dt>Yo'nalish</dt><dd>{d.kind === 'Sale' ? 'Sotuv (biz sotamiz)' : 'Xarid (biz olamiz)'}</dd>
+              <dt>MChJ nomi</dt><dd>{d.counterparty.name}</dd>
               <dt>INN</dt><dd className="mono">{d.counterparty.inn ?? '—'}</dd>
-              <dt>Summa</dt><dd className="num">{money(d.amountTotal)}</dd>
-              <dt>To'langan</dt>
+              <dt>Shartnoma summasi</dt><dd className="num">{money(d.amountTotal)}</dd>
+              <dt>To'langan summa</dt>
               <dd className="num" style={{ color: d.amountPaid >= d.amountTotal ? 'var(--ok)' : 'var(--warn)' }}>
                 {money(d.amountPaid)}</dd>
               <dt>Qolgan qarz</dt>
               <dd className="num" style={{ color: d.amountTotal - d.amountPaid > 0 ? 'var(--bad)' : 'var(--ok)' }}>
                 {money(d.amountTotal - d.amountPaid)}</dd>
-              <dt>Yosh</dt><dd>{d.ageDays} kun</dd>
+              <dt>Ochilganiga</dt><dd>{d.ageDays} kun</dd>
               <dt>Shartnoma sanasi</dt><dd>{dateUz(d.contractDate)}</dd>
             </dl>
           </div>
@@ -148,38 +114,8 @@ export default function DealCardPage() {
 
         <div className="col">
           <div className="card">
-            <div className="card-h"><h2>Tovarlar</h2>
-              <span className="hint">{d.items.length} pozitsiya</span></div>
-            <div className="tw">
-              <table>
-                <thead><tr>
-                  <th>Tovar</th><th>MXIK</th><th className="r">Soni</th>
-                  <th className="r">Narx</th><th className="r">Summa</th>
-                </tr></thead>
-                <tbody>
-                  {d.items.map(it => (
-                    <tr key={it.id}>
-                      <td>{it.product}</td>
-                      <td className="mono" style={{ fontSize: 11.5, color: it.mxik ? 'var(--ink-3)' : 'var(--crit)' }}>
-                        {it.mxik ?? "yo'q ⚠"}</td>
-                      <td className="r num">{money(it.qty)} {it.unit}</td>
-                      <td className="r num">{money(it.price)}</td>
-                      <td className="r num" style={{ fontWeight: 500 }}>{money(it.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line)', textAlign: 'right', fontSize: 13, color: 'var(--ink-3)' }}>
-              Jami <b className="num" style={{ color: 'var(--ink)', fontSize: 15, marginLeft: 8 }}>
-                {money(d.amountTotal)}</b>
-            </div>
-          </div>
-
-          <div className="card">
             <div className="card-h">
-              <h2>Hujjatlar zanjiri</h2>
-              <span className="hint">qaysi hujjat qaysi asos bilan chiqqan</span>
+              <h2>Hujjatlar ketma-ketligi</h2>
             </div>
             {d.documents.length === 0
               ? <div className="empty">Hali hujjat yo'q</div>
@@ -203,7 +139,7 @@ export default function DealCardPage() {
                           <div className="ch-basis">
                             {x.basis
                               ? <>asos: <b>{x.basis}</b></>
-                              : <span style={{ fontStyle: 'italic' }}>zanjir boshi</span>}
+                              : <span style={{ fontStyle: 'italic' }}>birinchi hujjat</span>}
                           </div>
                         </div>
                       </li>
@@ -214,7 +150,7 @@ export default function DealCardPage() {
 
           <div className="card">
             <div className="card-h">
-              <h2>To'lovlar</h2>
+              <h2>Shu shartnoma bo'yicha to'lovlar</h2>
               <span className="hint">{d.kind === 'Sale' ? 'klient bizga' : 'biz postavshikka'}</span>
             </div>
             {/* Qisman to'lov normal holat — qancha qolgani doim ko'rinib tursin. */}
@@ -236,7 +172,7 @@ export default function DealCardPage() {
             </div>
             <div className="tw">
               <table>
-                <thead><tr><th>Sana</th><th>Bank hujjati</th><th>Maqsad</th><th className="r">Summa</th></tr></thead>
+                <thead><tr><th>To'lov sanasi</th><th>Bank hujjati raqami</th><th>To'lov maqsadi</th><th className="r">To'lov summasi</th></tr></thead>
                 <tbody>
                   {d.payments.length === 0 && <tr><td colSpan={4} className="empty">To'lov hali kelmagan</td></tr>}
                   {d.payments.map(p => (
@@ -254,16 +190,6 @@ export default function DealCardPage() {
         </div>
       </div>
 
-      {docForm === 'Doverennost' && (
-        <DoverennostForm dealNumber={d.number} busy={busy}
-          onClose={() => setDocForm(null)}
-          onSubmit={data => { createDoc('Doverennost', { doverennost: data }); setDocForm(null) }} />
-      )}
-      {docForm === 'Ttn' && (
-        <TtnForm busy={busy}
-          onClose={() => setDocForm(null)}
-          onSubmit={data => { createDoc('Ttn', { ttn: data }); setDocForm(null) }} />
-      )}
     </>
   )
 }
@@ -278,103 +204,3 @@ const docLabel = (s: string) => ({
 } as Record<string, string>)[s] ?? s
 
 // ── Doverennost formasi (Didox: Agent.Pinfl MAJBURIY) ──
-function DoverennostForm({ dealNumber, busy, onClose, onSubmit }: {
-  dealNumber: string; busy: boolean; onClose: () => void
-  onSubmit: (d: Record<string, unknown>) => void
-}) {
-  const emps = useAsync(() => api.get<{ id: number; fullName: string; position: string | null; pinfl: string | null; canReceiveGoods: boolean }[]>('/api/employees'), [])
-  const ready = (emps.data ?? []).filter(e => e.canReceiveGoods)
-  const [employeeId, setEmployeeId] = useState<number | ''>('')
-  const [validUntil, setValidUntil] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() + 10)
-    return d.toISOString().slice(0, 10)
-  })
-
-  return (
-    <Modal title="Doverennost chiqarish" onClose={onClose} busy={busy}
-      okLabel="Shakllantirish"
-      onOk={() => {
-        if (!employeeId) return
-        onSubmit({ employeeId, validUntil, basisDocument: dealNumber })
-      }}>
-      <div className="full alert info">
-        <div>Didox <b>ishonchli shaxs PINFL</b> ini majburiy talab qiladi.
-          Passport ixtiyoriy — qog'oz nusxa uchun saqlanadi.</div>
-      </div>
-      {ready.length === 0 && (
-        <div className="full alert crit">
-          <div>PINFL kiritilgan xodim yo'q. <b>Sozlamalar → Xodimlar</b> bo'limiga kiring.</div>
-        </div>
-      )}
-      <Field label="Ishonchli shaxs" required full>
-        <select className="inp" value={employeeId} onChange={e => setEmployeeId(Number(e.target.value))}>
-          <option value="">— tanlang —</option>
-          {ready.map(e => (
-            <option key={e.id} value={e.id}>{e.fullName} · {e.position ?? ''} · {e.pinfl}</option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Amal qilish muddati" required hint="muddat o'tsa eslatma chiqadi">
-        <input className="inp" type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} />
-      </Field>
-      <Field label="Asos hujjat">
-        <input className="inp" value={dealNumber} readOnly />
-      </Field>
-    </Modal>
-  )
-}
-
-// ── TTN formasi ──
-function TtnForm({ busy, onClose, onSubmit }: {
-  busy: boolean; onClose: () => void; onSubmit: (d: Record<string, unknown>) => void
-}) {
-  const drivers = useAsync(() => api.get<{ id: number; fullName: string; pinfl: string | null }[]>('/api/employees?driversOnly=true'), [])
-  const vehicles = useAsync(() => api.get<{ id: number; model: string; plateNumber: string }[]>('/api/vehicles'), [])
-  const [driverId, setDriverId] = useState<number | ''>('')
-  const [vehicleId, setVehicleId] = useState<number | ''>('')
-  const [loadAddress, setLoad] = useState('')
-  const [unloadAddress, setUnload] = useState('')
-  const [distanceKm, setKm] = useState('')
-  const [weightBrutto, setW] = useState('')
-
-  return (
-    <Modal title="TTN chiqarish" onClose={onClose} busy={busy} okLabel="Shakllantirish"
-      onOk={() => {
-        if (!driverId || !vehicleId || !loadAddress || !unloadAddress) return
-        onSubmit({
-          driverId, vehicleId, loadAddress, unloadAddress,
-          distanceKm: distanceKm ? Number(distanceKm) : null,
-          weightBrutto: weightBrutto ? Number(weightBrutto) : null,
-        })
-      }}>
-      <div className="full alert info">
-        <div>Didox TTN uchun haydovchi <b>PINFL</b>, mashina <b>davlat raqami</b> va
-          <b> yuk ortish/tushirish nuqtalari</b> talab qiladi.</div>
-      </div>
-      <Field label="Haydovchi" required>
-        <select className="inp" value={driverId} onChange={e => setDriverId(Number(e.target.value))}>
-          <option value="">— tanlang —</option>
-          {(drivers.data ?? []).map(e => <option key={e.id} value={e.id}>{e.fullName} · {e.pinfl}</option>)}
-        </select>
-      </Field>
-      <Field label="Avtomobil" required>
-        <select className="inp" value={vehicleId} onChange={e => setVehicleId(Number(e.target.value))}>
-          <option value="">— tanlang —</option>
-          {(vehicles.data ?? []).map(v => <option key={v.id} value={v.id}>{v.model} · {v.plateNumber}</option>)}
-        </select>
-      </Field>
-      <Field label="Yuk ortish manzili" required full>
-        <input className="inp" value={loadAddress} onChange={e => setLoad(e.target.value)} />
-      </Field>
-      <Field label="Yuk tushirish manzili" required full>
-        <input className="inp" value={unloadAddress} onChange={e => setUnload(e.target.value)} />
-      </Field>
-      <Field label="Masofa, km">
-        <input className="inp" type="number" value={distanceKm} onChange={e => setKm(e.target.value)} />
-      </Field>
-      <Field label="Og'irlik brutto, t">
-        <input className="inp" type="number" step="0.001" value={weightBrutto} onChange={e => setW(e.target.value)} />
-      </Field>
-    </Modal>
-  )
-}

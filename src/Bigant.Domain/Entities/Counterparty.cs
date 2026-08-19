@@ -61,20 +61,24 @@ public class Counterparty
     public bool IsReadyForDidox => !MissingForDidox().Any();
 
     /// <summary>
-    /// Nima yetishmayapti. Har biri qaysi hujjatga kerakligi bilan —
-    /// bugalter nimadan boshlashni bilsin.
+    /// Nima yetishmayapti.
+    ///
+    /// FAQAT TANIB OLISH UCHUN KERAK BO'LGANI so'raladi: INN va nom.
+    /// Hujjat kelganda uni aynan shu kontragentga bog'lash — tizimning
+    /// bu maydonlardan yagona ehtiyoji shu.
+    ///
+    /// Ilgari bu yerda direktor F.I.Sh, PINFL, hisob raqami, MFO va manzil
+    /// ham so'ralardi. Ular BIZ hujjat yaratgan davrda kerak edi: dogovor va
+    /// faktura blanklariga shular yozilardi. Endi hujjatni Didox yaratadi va
+    /// bu ma'lumotlar Didox tomonida turadi — bizda ular hech qayerda
+    /// o'qilmaydi. Ularni talab qilish 93 kontragentdan 89 tasini «nosoz»
+    /// deb ko'rsatardi va bugalterga ma'nosiz ogohlantirish yog'dirardi.
     /// </summary>
     public IEnumerable<string> MissingForDidox()
     {
         if (string.IsNullOrWhiteSpace(Inn) && string.IsNullOrWhiteSpace(Pinfl))
             yield return "INN yoki PINFL";
-        if (string.IsNullOrWhiteSpace(Name))          yield return "Nomi";
-        if (string.IsNullOrWhiteSpace(DirectorName))  yield return "Direktor F.I.Sh (faktura uchun)";
-        // Dogovor NK Owner/Clients blokida FizTin (direktor PINFL) majburiy.
-        if (string.IsNullOrWhiteSpace(DirectorPinfl)) yield return "Direktor PINFL (dogovor uchun)";
-        if (string.IsNullOrWhiteSpace(BankAccount))   yield return "Hisob raqami";
-        if (string.IsNullOrWhiteSpace(BankMfo))       yield return "Bank MFO";
-        if (string.IsNullOrWhiteSpace(Address))       yield return "Manzil";
+        if (string.IsNullOrWhiteSpace(Name)) yield return "Nomi";
     }
 
     /// <summary>Otsrochka kunlari. 0 = oldindan to'lov.</summary>

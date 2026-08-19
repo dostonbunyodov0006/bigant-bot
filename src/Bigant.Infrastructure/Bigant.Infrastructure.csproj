@@ -12,6 +12,11 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <!-- Zaiflik yopilishi. EntityFrameworkCore.Design (migratsiya vositasi) eski
+         9.0.0 versiyani tortib kelardi. U ishlaydigan dasturga kirmaydi, lekin
+         tekshiruvda «yuqori darajali zaiflik» deb chiqardi. Yangi versiyaga
+         to'g'ridan-to'g'ri bog'lanamiz. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Bigant.Domain/Bigant.Domain.csproj" />

@@ -29,6 +29,10 @@ builder.Host.UseSerilog((ctx, cfg) => cfg
     // Telegram tokeni URL ichida ketadi (api.telegram.org/bot<TOKEN>/...).
     // Shu sabab log fayliga token tushib qolardi. Warning'dan pastini o'chiramiz.
     .MinimumLevel.Override("System.Net.Http.HttpClient", LogEventLevel.Warning)
+    // ASP.NET ning o'z «Request starting/finished» yozuvi to'liq manzilni
+    // yozadi — /api/live da token manzilda bo'lgani uchun u ham logga tushardi.
+    // Serilog'ning UseSerilogRequestLogging'i baribir har so'rovni yozib boradi.
+    .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Warning)
     .WriteTo.Console()
     .WriteTo.File("logs/bigant-.log", rollingInterval: RollingInterval.Day, retainedFileCountLimit: 30));
 
@@ -83,7 +87,6 @@ builder.Services.AddHostedService<TelegramBotWorker>();
 
 builder.Services.AddScoped<ReminderJob>();
 builder.Services.AddScoped<DigestJob>();
-builder.Services.AddScoped<OutboxJob>();
 builder.Services.AddScoped<InboxJob>();
 builder.Services.AddScoped<StatusSyncJob>();
 
@@ -110,29 +113,60 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key)),
             ClockSkew = TimeSpan.FromMinutes(1)
         };
+
+        // JONLI OQIM (SSE) uchun. Brauzerning EventSource'i sarlavha qo'sha
+        // olmaydi, shuning uchun token manzilda keladi. FAQAT /api/live uchun —
+        // boshqa endpointlarda manzildagi token qabul qilinmaydi.
+        o.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = c =>
+            {
+                if (c.Request.Path.StartsWithSegments("/api/live") &&
+                    c.Request.Query.TryGetValue("access_token", out var t))
+                    c.Token = t;
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
-    .WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? ["http://localhost:5173"])
-    .AllowAnyHeader().AllowAnyMethod()));
+// CORS.
+// Odatda KERAK EMAS: dashboard shu xizmatning o'zidan tarqatiladi
+// (wwwroot), ya'ni bir xil manba. Sozlama faqat ishlab chiqish uchun —
+// vite dev-server boshqa portda turganda. Ro'yxat bo'sh bo'lsa CORS
+// umuman ochilmaydi, bu eng xavfsiz holat.
+var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [];
+builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
+{
+    if (corsOrigins.Length > 0)
+        p.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod();
+}));
 
-// Parol tanlash hujumiga qarshi — login endpointi cheklanadi.
+// Chegaralar HAR BIR MANZIL (IP) UCHUN alohida hisoblanadi.
+// Umumiy chegara xavfli edi: bitta hujumchi 10 ta so'rov yuborib
+// butun kompaniyaning kirishini bloklab qo'yardi (2026-08-19 auditda topilgan).
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    o.AddFixedWindowLimiter("login", w =>
-    {
-        w.Window = TimeSpan.FromMinutes(1);
-        w.PermitLimit = 10;
-        w.QueueLimit = 0;
-    });
-    o.AddFixedWindowLimiter("api", w =>
-    {
-        w.Window = TimeSpan.FromMinutes(1);
-        w.PermitLimit = 300;
-        w.QueueLimit = 0;
-    });
+
+    static string Ip(HttpContext c) =>
+        c.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    o.AddPolicy("login", c => RateLimitPartition.GetFixedWindowLimiter(
+        Ip(c), _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 10,
+            QueueLimit = 0,
+        }));
+
+    o.AddPolicy("api", c => RateLimitPartition.GetFixedWindowLimiter(
+        Ip(c), _ => new FixedWindowRateLimiterOptions
+        {
+            Window = TimeSpan.FromMinutes(1),
+            PermitLimit = 300,
+            QueueLimit = 0,
+        }));
 });
 
 // Enumlar matn sifatida keladi va ketadi: "Sale", "Esf", "Accountant".
@@ -155,7 +189,15 @@ app.UseExceptionHandler(x => x.Run(async ctx =>
     var ex = ctx.Features.Get<IExceptionHandlerFeature>()?.Error;
     if (ex is BusinessException be)
     {
-        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        // Kod javob turini belgilaydi. Ilgari hammasi 400 edi va «ruxsat yo'q»
+        // «so'rov noto'g'ri» dan farq qilmasdi — brauzer ham, Ruslanning
+        // integratsiyasi ham ikkalasini ajrata olmasdi.
+        ctx.Response.StatusCode = be.Code switch
+        {
+            "FORBIDDEN"  => StatusCodes.Status403Forbidden,
+            "NOT_FOUND"  => StatusCodes.Status404NotFound,
+            _            => StatusCodes.Status400BadRequest
+        };
         await ctx.Response.WriteAsJsonAsync(new { code = be.Code, message = be.Message });
         return;
     }
@@ -221,8 +263,25 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseSerilogRequestLogging();
+// XAVFSIZLIK: /api/live manzilida token bo'ladi — uni logga yozmaymiz.
+app.UseSerilogRequestLogging(o =>
+{
+    o.GetLevel = (ctx, _, ex) =>
+        ex is not null ? LogEventLevel.Error
+        : ctx.Request.Path.StartsWithSegments("/api/live") ? LogEventLevel.Verbose
+        : LogEventLevel.Information;
+});
+// ── DASHBOARD SHU YERDAN TARQATILADI ──
+// Front va API bitta manzilda bo'lgani uchun CORS kerak emas va
+// serverda alohida veb-server sozlash shart emas: bitta xizmat yetadi.
+// wwwroot bo'sh bo'lsa (front qurilmagan) — hech narsa buzilmaydi.
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 app.UseRateLimiter();
+
+// Har bir /api guruhiga umumiy chegara qo'llanadi (Program oxirida).
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -236,6 +295,23 @@ app.MapInboxEndpoints();
 app.MapNotificationEndpoints();
 app.MapDashboardEndpoints();
 app.MapRoleDashboardEndpoints();
+app.MapLiveEndpoints();
+
+// React yo'llari (/realizatsiya, /perehod, ...) serverda fayl emas —
+// hammasini index.html ga yo'naltiramiz, marshrutni brauzer hal qiladi.
+// /api va /health bundan mustasno.
+app.MapFallback((HttpContext ctx) =>
+{
+    var path = ctx.Request.Path.Value ?? "/";
+    if (path.StartsWith("/api", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
+    var index = Path.Combine(app.Environment.WebRootPath ?? "wwwroot", "index.html");
+    return File.Exists(index)
+        ? Results.File(index, "text/html")
+        : Results.Text("Dashboard qurilmagan. web/ katalogida: npm run build", "text/plain");
+});
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", didox = didoxOptions.Enabled }))
    .AllowAnonymous();
@@ -261,9 +337,10 @@ var uz = UzTime.Zone;
 jobs.AddOrUpdate<ReminderJob>("eslatmalar", j => j.RunAsync(CancellationToken.None), "*/30 * * * *");
 jobs.AddOrUpdate<DigestJob>("kunlik-xulosa", j => j.RunAsync(CancellationToken.None), "0 9 * * *",
     new RecurringJobOptions { TimeZone = uz });
-jobs.AddOrUpdate<OutboxJob>("chiquvchi-navbat", j => j.RunAsync(CancellationToken.None), "* * * * *");
+// Yuborilgan hujjat qabul qilindimi — Didox'dan holat so'raladi.
+// Didox o'chiq bo'lsa hech narsa qilmaydi.
+jobs.AddOrUpdate<StatusSyncJob>("hujjat-holati", j => j.RunAsync(CancellationToken.None), "*/5 * * * *");
 jobs.AddOrUpdate<InboxJob>("kiruvchi-hujjatlar", j => j.RunAsync(CancellationToken.None),
     $"*/{Math.Max(1, didoxOptions.InboxPollMinutes)} * * * *");
-jobs.AddOrUpdate<StatusSyncJob>("holat-sinxronizatsiya", j => j.RunAsync(CancellationToken.None), "*/15 * * * *");
 
 app.Run();

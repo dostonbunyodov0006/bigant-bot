@@ -11,13 +11,18 @@ namespace Bigant.Api.Endpoints;
 
 public static class NotificationEndpoints
 {
-    public sealed record MarkReadRequest(List<long> Ids);
+    /// <summary>
+    /// `Ids` bo'sh kelishi mumkin — brauzer uzilib qolgan so'rov yuborsa
+    /// yoki tashqi vosita chaqirsa. Ilgari bunday holatda server ichki
+    /// xato (500) qaytarardi.
+    /// </summary>
+    public sealed record MarkReadRequest(List<long>? Ids);
 
     public static void MapNotificationEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/notifications").WithTags("Eslatmalar").RequireAuthorization();
+        var g = app.MapGroup("/api/notifications").WithTags("Eslatmalar").RequireAuthorization().RequireRateLimiting("api");
 
-        g.MapGet("", async (bool? unreadOnly, int? take, CurrentUser cu,
+        g.MapGet("", async (bool? unreadOnly, int? take, int? skip, CurrentUser cu,
                             AppDbContext db, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
@@ -31,12 +36,19 @@ public static class NotificationEndpoints
                 .Where(n => seesAll || n.TargetRole == null || n.TargetRole == role);
             if (unreadOnly == true) q = q.Where(n => !n.IsRead);
 
-            var rows = await q.OrderByDescending(n => n.CreatedAt)
+            // `Id` bo'yicha ham tartiblaymiz: bir soniyada tug'ilgan bir nechta
+            // eslatma sahifalar orasida joyini almashtirib, biri ikki marta,
+            // boshqasi umuman ko'rinmay qolmasligi uchun.
+            var rows = await q.OrderByDescending(n => n.CreatedAt).ThenByDescending(n => n.Id)
+                .Skip(Math.Max(0, skip ?? 0))
                 .Take(Math.Clamp(take ?? 50, 1, 200))
                 .Select(n => new
                 {
                     n.Id, kind = n.Kind.ToString(), severity = n.Severity.ToString(),
-                    n.Title, n.Body, n.DealId, n.DocumentId, n.IsRead, n.CreatedAt
+                    n.Title, n.Body, n.DealId, n.DocumentId, n.IsRead, n.CreatedAt,
+                    // Qaysi rol uchun ekani ko'rinsin: admin hammasini ko'radi va
+                    // qaysi biri kimga tegishli ekanini ajrata olishi kerak.
+                    targetRole = n.TargetRole == null ? null : n.TargetRole.ToString()
                 }).ToListAsync(ct);
 
             var unread = await db.Notifications
@@ -49,8 +61,28 @@ public static class NotificationEndpoints
                                   INotificationService svc, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
+            if (body.Ids is not { Count: > 0 }) return Results.Ok(new { marked = 0 });
+
             var seesAll = true;
             var n = await svc.MarkReadAsync(actor.Id, body.Ids, seesAll, ct);
+            return Results.Ok(new { marked = n });
+        });
+
+        // «Hammasini o'qildi» — ekranga yuklanganini emas, HAMMASINI.
+        // Ilgari tugma faqat ochilgan ro'yxatdagi id larni yuborardi, shuning
+        // uchun mingta eslatma bo'lsa hisoblagich nolga tushmasdi.
+        g.MapPost("/read-all", async (CurrentUser cu, AppDbContext db, CancellationToken ct) =>
+        {
+            var actor = await cu.GetAsync(ct);
+            var seesAll = actor.Role == UserRole.Admin;
+
+            var n = await db.Notifications
+                .Where(x => !x.IsRead
+                         && (seesAll || x.TargetRole == null || x.TargetRole == actor.Role))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.IsRead, true)
+                    .SetProperty(x => x.ReadAt, DateTimeOffset.UtcNow), ct);
+
             return Results.Ok(new { marked = n });
         });
 

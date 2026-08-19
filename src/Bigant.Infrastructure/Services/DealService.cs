@@ -159,10 +159,12 @@ public sealed class DealService : IDealService
         await _notify.RaiseAsync(new Notification
         {
             Kind = NotificationKind.DailyDigest,
+            // Bitim yopilishi — sotuv natijasi, realizatsiya buxgalteriga.
+            TargetRole = UserRole.Realizatsiya,
             Severity = NotificationSeverity.Info,
             UserId = deal.ManagerId,
             DealId = deal.Id,
-            Title = $"Shartnoma {deal.Number} yopildi",
+            Title = $"✅ SHARTNOMA YOPILDI — {deal.Number}",
             Body = $"{deal.Counterparty?.Name} — {deal.AmountTotal:N0} so'm. Barcha hujjatlar to'liq.",
             DedupKey = $"Closed:deal:{deal.Id}"
         }, ct);

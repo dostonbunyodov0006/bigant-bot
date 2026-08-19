@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1F5F8B"/>
+  <g transform="translate(256 232) scale(5.2) translate(-32 -32)">
+    <g stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" fill="none">
+      <path d="M27 30 L14 20"/><path d="M27 34 L12 34"/><path d="M27 38 L14 48"/>
+      <path d="M37 30 L50 20"/><path d="M37 34 L52 34"/><path d="M37 38 L50 48"/>
+    </g>
+    <g stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" fill="none">
+      <path d="M30 17 L25 8"/><path d="M34 17 L39 8"/>
+    </g>
+    <circle cx="32" cy="17" r="7.5" fill="#FFFFFF"/>
+    <circle cx="32" cy="31" r="6" fill="#FFFFFF"/>
+    <ellipse cx="32" cy="47" rx="8.5" ry="10" fill="#FFFFFF"/>
+  </g>
+  <text x="256" y="452" text-anchor="middle" fill="#FFFFFF"
+        font-family="Archivo, Segoe UI, sans-serif" font-weight="700"
+        font-size="58" letter-spacing="9">BIGANT</text>
+</svg>

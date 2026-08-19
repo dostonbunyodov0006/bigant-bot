@@ -35,7 +35,7 @@ public static class InboxEndpoints
 
     public static void MapInboxEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/inbox").WithTags("Kiruvchi hujjatlar").RequireAuthorization();
+        var g = app.MapGroup("/api/inbox").WithTags("Kiruvchi hujjatlar").RequireAuthorization().RequireRateLimiting("api");
 
         g.MapGet("", async (AppDbContext db, IDidoxClient didox, CancellationToken ct) =>
         {
@@ -58,6 +58,27 @@ public static class InboxEndpoints
         // Qo'lda ro'yxatga olish — Didox o'chiq paytdagi asosiy kirish nuqtasi.
         g.MapPost("", async (RegisterIncoming req, IInboxService inbox, CurrentUser cu, CancellationToken ct) =>
         {
+            // ── KIRUVCHI MA'LUMOTNI TEKSHIRISH ──
+            // Bu yerga Didox ham, qo'l ham yozadi. Noto'g'ri qiymat o'tib
+            // ketsa qarz hisobi buziladi va uni keyin topib bo'lmaydi.
+            if (!Enum.IsDefined(req.DocType))
+                throw new BusinessException("BAD_DOC_TYPE", "Hujjat turi noto'g'ri");
+            if (!Enum.IsDefined(req.Direction))
+                throw new BusinessException("BAD_DIRECTION", "Hujjat yo'nalishi noto'g'ri");
+
+            // Manfiy summa qarzni teskari tomonga o'zgartiradi.
+            if (req.Amount < 0)
+                throw new BusinessException("NEGATIVE_AMOUNT", "Hujjat summasi manfiy bo'lishi mumkin emas");
+            if (req.VatAmount < 0)
+                throw new BusinessException("NEGATIVE_VAT", "QQS summasi manfiy bo'lishi mumkin emas");
+            if (req.VatAmount > req.Amount && req.Amount > 0)
+                throw new BusinessException("VAT_TOO_BIG", "QQS umumiy summadan katta bo'lishi mumkin emas");
+
+            // Juda uzoq kelajak yoki o'tmish — sana xato kiritilgan.
+            var d = req.DocDate ?? UzTime.Today;
+            if (d.Year < 2000 || d > UzTime.Today.AddYears(5))
+                throw new BusinessException("BAD_DATE", "Hujjat sanasi haqiqiy emas");
+
             var doc = await inbox.RegisterAsync(new IncomingDocument(
                 req.DocType,
                 DidoxId: null,
