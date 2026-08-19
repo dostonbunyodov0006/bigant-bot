@@ -238,7 +238,7 @@ public sealed class DealService : IDealService
         var s = deal.Steps.FirstOrDefault(x => x.Step == step)
                 ?? throw new BusinessException("NO_STEP", "Bunday qadam yo'q");
 
-        if (s.IsRequired && actor.Role is not (UserRole.Manager or UserRole.Admin))
+        if (s.IsRequired && actor.Role != UserRole.Admin)
             throw new BusinessException("FORBIDDEN", "Majburiy qadamni faqat rahbar o'tkazib yuboradi");
 
         s.Status = StepStatus.Skipped;
@@ -253,7 +253,7 @@ public sealed class DealService : IDealService
 
     public async Task<Deal> CancelAsync(long dealId, AppUser actor, string reason, CancellationToken ct = default)
     {
-        if (actor.Role is not (UserRole.Manager or UserRole.Admin or UserRole.Accountant))
+        if (actor.Role is not (UserRole.Realizatsiya or UserRole.Perehod or UserRole.Admin))
             throw new BusinessException("FORBIDDEN", "Shartnomani bekor qilishga huquqingiz yo'q");
 
         var deal = await LoadAsync(dealId, ct);
@@ -362,7 +362,7 @@ public sealed class DealService : IDealService
     /// </summary>
     private static void ValidateSalePrice(Product p, decimal basePriceUzs, decimal price, AppUser actor)
     {
-        var isBoss = actor.Role is UserRole.Manager or UserRole.Admin;
+        var isBoss = actor.Role == UserRole.Admin;
 
         // 1 so'mgacha farqqa yo'l qo'yamiz — kurs konvertatsiyasida yaxlitlash bo'ladi.
         if (p.IsPriceFixed && Math.Abs(price - basePriceUzs) > 1m && !isBoss)

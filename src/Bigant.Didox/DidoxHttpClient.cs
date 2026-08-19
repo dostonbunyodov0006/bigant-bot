@@ -121,11 +121,21 @@ public sealed class DidoxHttpClient : IDidoxClient
     }
 
     // ── Kiruvchi hujjatlar ──────────────────────────────────────────
-    public async Task<IReadOnlyList<DidoxInboxItem>> PullInboxAsync(
+    public Task<IReadOnlyList<DidoxInboxItem>> PullInboxAsync(
         DateTimeOffset since, CancellationToken ct = default)
-    {
         // TODO(didox): inbox endpointi va filtr parametrlarini to'ldiring.
-        var req = await BuildAsync(HttpMethod.Get, $"v1/documents/inbox?from={since:yyyy-MM-dd}", ct);
+        => PullListAsync($"v1/documents/inbox?from={since:yyyy-MM-dd}", ct);
+
+    public Task<IReadOnlyList<DidoxInboxItem>> PullOutboxAsync(
+        DateTimeOffset since, CancellationToken ct = default)
+        // TODO(didox): BIZ YUBORGAN hujjatlar ro'yxati endpointi.
+        // Bugalter Didox'da yaratgan dogovor/faktura/TTN shu yerdan keladi.
+        => PullListAsync($"v1/documents/outbox?from={since:yyyy-MM-dd}", ct);
+
+    /// <summary>Ikkala ro'yxat ham bir xil shaklda qaytadi — o'qish kodi bitta.</summary>
+    private async Task<IReadOnlyList<DidoxInboxItem>> PullListAsync(string path, CancellationToken ct)
+    {
+        var req = await BuildAsync(HttpMethod.Get, path, ct);
         using var resp = await _http.SendAsync(req, ct);
         resp.EnsureSuccessStatusCode();
 

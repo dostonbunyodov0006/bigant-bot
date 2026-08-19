@@ -47,6 +47,7 @@ public sealed class ReminderJob
                 raised += await Raise(new Notification
                 {
                     Kind = NotificationKind.PaidNotShipped,
+                    TargetRole = UserRole.Realizatsiya,
                     Severity = NotificationSeverity.Critical,
                     UserId = d.ManagerId,
                     DealId = d.Id,
@@ -68,6 +69,7 @@ public sealed class ReminderJob
                     raised += await Raise(new Notification
                     {
                         Kind = NotificationKind.ShippedNotPaid,
+                        TargetRole = UserRole.Realizatsiya,
                         Severity = daysSince > grace + 7
                             ? NotificationSeverity.Critical
                             : NotificationSeverity.Warning,
@@ -96,6 +98,7 @@ public sealed class ReminderJob
                 raised += await Raise(new Notification
                 {
                     Kind = NotificationKind.StepOverdue,
+                    TargetRole = UserRole.Perehod,
                     Severity = late > 7 ? NotificationSeverity.Critical : NotificationSeverity.Warning,
                     UserId = d.ManagerId,
                     DealId = d.Id,
@@ -153,6 +156,7 @@ public sealed class ReminderJob
             raised += await Raise(new Notification
             {
                 Kind = NotificationKind.IncomingDocument,
+                TargetRole = UserRole.Perehod,
                 Severity = NotificationSeverity.Critical,
                 UserId = first.ManagerId,
                 DealId = first.DealId,
@@ -200,6 +204,7 @@ public sealed class ReminderJob
             raised += await Raise(new Notification
             {
                 Kind = NotificationKind.StepOverdue,
+                TargetRole = UserRole.Perehod,
                 Severity = expired ? NotificationSeverity.Critical : NotificationSeverity.Warning,
                 UserId = deal.ManagerId,
                 DealId = deal.Id,

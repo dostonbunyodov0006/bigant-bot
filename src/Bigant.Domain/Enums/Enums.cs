@@ -1,11 +1,21 @@
 namespace Bigant.Domain.Enums;
 
-/// <summary>Foydalanuvchi roli.</summary>
+/// <summary>
+/// ROLLAR. Har biri faqat O'Z ISHINI ko'radi — ortiqcha ma'lumot chalg'itadi.
+///
+///   Realizatsiya — «Nima sotdik, kimga, qancha summaga, puli keldimi?»
+///                  Sotuv bitimlari, faktura/TTN tekshiruvi, QQS, debitor qarz.
+///
+///   Perehod      — «Bu hujjat qaysi hujjatga tegishli, keyingi bosqichga
+///                  qanday o'tadi?» Hujjat zanjiri, uzilishlar, kiruvchi hujjatlar.
+///
+///   Admin        — hammasini ko'radi, foydalanuvchi va sozlamalarni boshqaradi.
+/// </summary>
 public enum UserRole
 {
-    Accountant = 2,  // bugalter  â hujjat imzolaydi, to'lov kiritadi
-    Manager = 3,  // rahbar   - hamma narsani ko'radi
-    Admin = 4
+    Realizatsiya = 1,
+    Perehod = 2,
+    Admin = 3
 }
 
 /// <summary>Bitim turi: klientga sotuv yoki postavshikdan xarid.</summary>

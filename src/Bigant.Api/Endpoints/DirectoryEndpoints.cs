@@ -53,7 +53,7 @@ public static class DirectoryEndpoints
                               IAuditService audit, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager))
+            if (actor.Role != UserRole.Admin)
                 throw new BusinessException("FORBIDDEN", "Rekvizitlarni faqat rahbar o'zgartiradi");
 
             var p = await db.CompanyProfiles.FirstOrDefaultAsync(ct);

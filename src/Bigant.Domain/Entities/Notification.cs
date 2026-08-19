@@ -17,6 +17,19 @@ public class Notification
     public long? UserId { get; set; }
     public AppUser? User { get; set; }
 
+    /// <summary>
+    /// QAYSI ROLGA TEGISHLI.
+    ///
+    ///   Realizatsiya — pul, qarzdorlik, sotuv hujjatlari
+    ///   Perehod      — hujjat zanjiri, kutilayotgan hujjat, ilinmagan hujjat
+    ///   null         — ikkalasiga ham tegishli
+    ///
+    /// Admin har doim HAMMASINI ko'radi.
+    /// Maqsad: har bugalterga faqat o'z ishi bo'yicha xabar borsin —
+    /// ortiqcha xabar o'qilmay qoladi va muhimini bosib ketadi.
+    /// </summary>
+    public UserRole? TargetRole { get; set; }
+
     public string Title { get; set; } = default!;
     public string Body { get; set; } = default!;
 

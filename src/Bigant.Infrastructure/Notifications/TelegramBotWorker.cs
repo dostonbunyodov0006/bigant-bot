@@ -337,7 +337,7 @@ public sealed partial class TelegramBotWorker : BackgroundService
         }
 
         var actor = await db.Users
-            .FirstOrDefaultAsync(u => u.Role == UserRole.Accountant && u.IsActive, ct)
+            .FirstOrDefaultAsync(u => (u.Role == UserRole.Realizatsiya || u.Role == UserRole.Admin) && u.IsActive, ct)
             ?? await db.Users.FirstAsync(u => u.IsActive, ct);
 
         var direction = weReceived ? PaymentDirection.In : PaymentDirection.Out;
@@ -679,8 +679,8 @@ public sealed partial class TelegramBotWorker : BackgroundService
 
     private static string RoleName(UserRole r) => r switch
     {
-        UserRole.Accountant => "bugalter",
-        UserRole.Manager => "rahbar",
+        UserRole.Realizatsiya => "realizatsiya buxgalteri",
+        UserRole.Perehod => "perehod buxgalteri",
         _ => "admin"
     };
 

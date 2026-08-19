@@ -50,7 +50,7 @@ public static class AuthEndpoints
                                    IAuditService audit, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager))
+            if (actor.Role != UserRole.Admin)
                 throw new BusinessException("FORBIDDEN", "Foydalanuvchi qo'shishga huquqingiz yo'q");
 
             if (req.Password.Length < 8)
@@ -78,7 +78,7 @@ public static class AuthEndpoints
         g.MapGet("/users", async (CurrentUser cu, AppDbContext db, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager))
+            if (actor.Role != UserRole.Admin)
                 throw new BusinessException("FORBIDDEN", "Ruxsat yo'q");
 
             return Results.Ok(await db.Users.AsNoTracking()

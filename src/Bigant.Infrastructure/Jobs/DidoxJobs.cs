@@ -139,20 +139,29 @@ public sealed class InboxJob
 
         // 3 kunlik oyna — dublikat DidoxId indeksi bilan to'siladi.
         var since = DateTimeOffset.UtcNow.AddDays(-3);
-        var items = await _didox.PullInboxAsync(since, ct);
+
+        // IKKALA YO'NALISH ham tortiladi:
+        //   inbox  — postavshik/klient bizga yuborgani
+        //   outbox — bugalter Didox'da yaratib YUBORGANI
+        // Busiz «dogovor tashlandimi?» degan savolga javob bo'lmaydi.
+        var incoming = await _didox.PullInboxAsync(since, ct);
+        var outgoing = await _didox.PullOutboxAsync(since, ct);
         var added = 0;
 
-        foreach (var i in items)
+        foreach (var (i, dir) in incoming.Select(x => (x, DocDirection.In))
+                        .Concat(outgoing.Select(x => (x, DocDirection.Out))))
         {
             var doc = await _inbox.RegisterAsync(new IncomingDocument(
                 MapType(i.Kind), i.DidoxId, i.DocNumber, i.DocDate,
-                i.SenderInn, i.SenderName, i.Amount ?? 0m, i.VatAmount ?? 0m, i.RawJson), ct);
+                i.SenderInn, i.SenderName, i.Amount ?? 0m, i.VatAmount ?? 0m, i.RawJson,
+                Direction: dir), ct);
             if (doc is not null) added++;
         }
 
         if (added > 0)
         {
-            _log.LogInformation("Didox'dan {Count} ta yangi hujjat olindi", added);
+            _log.LogInformation("Didox'dan {Count} ta hujjat olindi ({In} kiruvchi, {Out} chiquvchi)",
+                added, incoming.Count, outgoing.Count);
             await _notify.PushPendingAsync(ct);
         }
     }

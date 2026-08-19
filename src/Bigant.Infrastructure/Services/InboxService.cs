@@ -17,7 +17,9 @@ public sealed record IncomingDocument(
     string? SenderName,
     decimal Amount,
     decimal VatAmount,
-    string RawJson);
+    string RawJson,
+    /// <summary>In — bizga keldi, Out — biz yubordik (Didox outbox).</summary>
+    DocDirection Direction = DocDirection.In);
 
 public interface IInboxService
 {
@@ -68,7 +70,7 @@ public sealed class InboxService : IInboxService
         {
             DealId = deal.Id,
             DocType = inc.DocType,
-            Direction = DocDirection.In,
+            Direction = inc.Direction,
             Status = DocStatus.Delivered,
             DocNumber = inc.DocNumber,
             DocDate = inc.DocDate,
@@ -120,13 +122,15 @@ public sealed class InboxService : IInboxService
         await _notify.RaiseAsync(new Notification
         {
             Kind = NotificationKind.IncomingDocument,
+            TargetRole = UserRole.Perehod,
             Severity = inc.DocType == DocType.Contract
                 ? NotificationSeverity.Warning       // dogovor — e'tibor talab qiladi
                 : NotificationSeverity.Info,
             UserId = deal.ManagerId,
             DealId = deal.Id,
             DocumentId = doc.Id,
-            Title = $"{DocIcon(inc.DocType)} {label.ToUpperInvariant()} KELDI",
+            Title = $"{DocIcon(inc.DocType)} {label.ToUpperInvariant()} " +
+                    (inc.Direction == DocDirection.Out ? "YUBORILDI" : "KELDI"),
             Body = body,
             DedupKey = $"Incoming:doc:{doc.Id}"
         }, ct);
@@ -272,7 +276,7 @@ public sealed class InboxService : IInboxService
 
         // Ko'rinish: kim → nima → qancha → qaysi asosda → qaysi shartnomada.
         // Har biri alohida qatorda, bir qarashda o'qiladi.
-        var body = $"Kimdan:  {who}\n";
+        var body = inc.Direction == DocDirection.Out ? $"Kimga:   {who}\n" : $"Kimdan:  {who}\n";
         body += $"Hujjat:  №{inc.DocNumber ?? "—"}\n";
         if (inc.Amount > 0) body += $"Summa:   {inc.Amount:N0} so'm\n";
         if (dovLine is not null) body += $"\n{dovLine}\n";

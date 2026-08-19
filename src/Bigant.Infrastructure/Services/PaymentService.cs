@@ -40,7 +40,7 @@ public sealed partial class PaymentService : IPaymentService
 
     public async Task<Payment> RegisterAsync(NewPayment req, AppUser actor, CancellationToken ct = default)
     {
-        if (actor.Role is not (UserRole.Accountant or UserRole.Manager or UserRole.Admin))
+        if (actor.Role is not (UserRole.Realizatsiya or UserRole.Perehod or UserRole.Admin))
             throw new BusinessException("FORBIDDEN", "To'lovni faqat bugalter kiritadi");
         if (req.Amount <= 0)
             throw new BusinessException("BAD_AMOUNT", "To'lov summasi musbat bo'lishi kerak");
@@ -190,6 +190,7 @@ public sealed partial class PaymentService : IPaymentService
         await _notify.RaiseAsync(new Notification
         {
             Kind = NotificationKind.Payment,
+            TargetRole = UserRole.Realizatsiya,
             Severity = isFull ? NotificationSeverity.Info : NotificationSeverity.Warning,
             UserId = deal.ManagerId,
             DealId = deal.Id,

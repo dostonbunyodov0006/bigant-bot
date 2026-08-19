@@ -43,7 +43,7 @@ public sealed class DigestJob
             $"Muddati o'tgan qadam: {s.OverdueSteps} ta";
 
         var bosses = await _db.Users
-            .Where(u => u.IsActive && (u.Role == UserRole.Manager || u.Role == UserRole.Accountant
+            .Where(u => u.IsActive && (u.Role == UserRole.Realizatsiya || u.Role == UserRole.Perehod
                                                                  || u.Role == UserRole.Admin))
             .ToListAsync(ct);
 

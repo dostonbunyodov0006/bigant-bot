@@ -22,11 +22,13 @@ public static class NotificationEndpoints
         {
             var actor = await cu.GetAsync(ct);
 
-            // Barcha foydalanuvchilar hamma eslatmani ko'radi (faqat bugalter va admin bor).
-            const bool seesAll = true;
+            // HAR ROL FAQAT O'Z XABARINI ko'radi. Admin — hammasini.
+            // TargetRole null bo'lsa xabar ikkala bugalterga ham tegishli.
+            var role = actor.Role;
+            var seesAll = role == UserRole.Admin;
 
             var q = db.Notifications.AsNoTracking()
-                .Where(n => seesAll || n.UserId == null || n.UserId == actor.Id);
+                .Where(n => seesAll || n.TargetRole == null || n.TargetRole == role);
             if (unreadOnly == true) q = q.Where(n => !n.IsRead);
 
             var rows = await q.OrderByDescending(n => n.CreatedAt)
@@ -38,7 +40,7 @@ public static class NotificationEndpoints
                 }).ToListAsync(ct);
 
             var unread = await db.Notifications
-                .CountAsync(n => !n.IsRead && (seesAll || n.UserId == null || n.UserId == actor.Id), ct);
+                .CountAsync(n => !n.IsRead && (seesAll || n.TargetRole == null || n.TargetRole == role), ct);
 
             return Results.Ok(new { unread, items = rows });
         });
@@ -47,7 +49,7 @@ public static class NotificationEndpoints
                                   INotificationService svc, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            var seesAll = actor.Role is UserRole.Manager or UserRole.Admin or UserRole.Accountant;
+            var seesAll = true;
             var n = await svc.MarkReadAsync(actor.Id, body.Ids, seesAll, ct);
             return Results.Ok(new { marked = n });
         });
@@ -72,7 +74,7 @@ public static class NotificationEndpoints
         g.MapDelete("/telegram", async (CurrentUser cu, AppDbContext db, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager))
+            if (actor.Role != UserRole.Admin)
                 throw new BusinessException("FORBIDDEN", "Faqat rahbar uzadi");
 
             var p = await db.CompanyProfiles.FirstOrDefaultAsync(ct);
@@ -84,7 +86,7 @@ public static class NotificationEndpoints
         g.MapPost("/run-check", async (CurrentUser cu, ReminderJob job, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager))
+            if (actor.Role != UserRole.Admin)
                 throw new BusinessException("FORBIDDEN", "Ruxsat yo'q");
 
             await job.RunAsync(ct);

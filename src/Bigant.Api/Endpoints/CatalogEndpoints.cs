@@ -195,7 +195,7 @@ public static class CatalogEndpoints
                                    CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager or UserRole.Accountant))
+            if (actor.Role is not (UserRole.Admin or UserRole.Realizatsiya or UserRole.Perehod))
                 throw new BusinessException("FORBIDDEN", "Ruxsat yo'q");
 
             var created = 0; var updated = 0;

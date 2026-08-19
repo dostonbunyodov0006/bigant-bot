@@ -237,6 +237,7 @@ app.MapPaymentEndpoints();
 app.MapInboxEndpoints();
 app.MapNotificationEndpoints();
 app.MapDashboardEndpoints();
+app.MapRoleDashboardEndpoints();
 app.MapRateEndpoints();
 app.MapImportEndpoints();
 

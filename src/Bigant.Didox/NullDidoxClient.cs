@@ -37,6 +37,10 @@ public sealed class NullDidoxClient : IDidoxClient
         DateTimeOffset since, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<DidoxInboxItem>>([]);
 
+    public Task<IReadOnlyList<DidoxInboxItem>> PullOutboxAsync(
+        DateTimeOffset since, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<DidoxInboxItem>>([]);
+
     public Task<DidoxStatus> GetStatusAsync(string didoxId, CancellationToken ct = default)
         => Task.FromResult(new DidoxStatus(didoxId, DidoxDocState.Delivered, null, DateTimeOffset.UtcNow));
 

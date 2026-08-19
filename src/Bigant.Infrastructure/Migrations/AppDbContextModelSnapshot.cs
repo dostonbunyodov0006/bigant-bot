@@ -1381,6 +1381,10 @@ namespace Bigant.Infrastructure.Migrations
                         .HasColumnType("character varying(16)")
                         .HasColumnName("severity");
 
+                    b.Property<string>("TargetRole")
+                        .HasColumnType("text")
+                        .HasColumnName("target_role");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(300)

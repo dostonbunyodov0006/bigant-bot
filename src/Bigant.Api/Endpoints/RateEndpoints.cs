@@ -54,7 +54,7 @@ public static class RateEndpoints
                              IAuditService audit, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Manager))
+            if (actor.Role != UserRole.Admin)
                 throw new BusinessException("FORBIDDEN", "Kursni faqat rahbar o'zgartiradi");
 
             if (req.Rate <= 0)

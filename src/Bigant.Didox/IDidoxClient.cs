@@ -27,6 +27,17 @@ public interface IDidoxClient
         DateTimeOffset since,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// BIZ YUBORGAN hujjatlarni tortib olish.
+    ///
+    /// Bugalter hujjatni Didox'ning o'zida yaratadi va yuboradi — bu tizim
+    /// uni faqat shu yerdan biladi. Busiz «dogovor tashlandimi?» degan
+    /// savolga javob bo'lmaydi va zanjirning yarmi ko'rinmay qoladi.
+    /// </summary>
+    Task<IReadOnlyList<DidoxInboxItem>> PullOutboxAsync(
+        DateTimeOffset since,
+        CancellationToken ct = default);
+
     /// <summary>Yuborilgan hujjat holatini so'rash (qabul qilindimi / rad etildimi).</summary>
     Task<DidoxStatus> GetStatusAsync(string didoxId, CancellationToken ct = default);
 

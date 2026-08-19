@@ -9,7 +9,7 @@ public class AppUser
     public string Username { get; set; } = default!;
     public string PasswordHash { get; set; } = default!;
     public string FullName { get; set; } = default!;
-    public UserRole Role { get; set; } = UserRole.Accountant;
+    public UserRole Role { get; set; } = UserRole.Realizatsiya;
 
 
     /// <summary>Telegram bildirishnomasi uchun. Bo'sh bo'lsa faqat tizim ichida ko'rinadi.</summary>

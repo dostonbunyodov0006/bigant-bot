@@ -183,7 +183,7 @@ public sealed class DocumentService : IDocumentService
     public async Task<Document> MarkSignedAsync(long documentId, string? pkcs7, AppUser actor,
         CancellationToken ct = default)
     {
-        if (actor.Role is not (UserRole.Accountant or UserRole.Manager or UserRole.Admin))
+        if (actor.Role is not (UserRole.Realizatsiya or UserRole.Perehod or UserRole.Admin))
             throw new BusinessException("FORBIDDEN", "Hujjatni faqat bugalter yoki rahbar imzolaydi");
 
         // Doverennost muddati xabarda ko'rsatiladi — shuning uchun yuklaymiz.
@@ -237,6 +237,7 @@ public sealed class DocumentService : IDocumentService
             await _notify.RaiseAsync(new Notification
             {
                 Kind = NotificationKind.IncomingDocument,
+                TargetRole = UserRole.Perehod,
                 Severity = NotificationSeverity.Info,
                 UserId = dealInfo.ManagerId,
                 DealId = doc.DealId,
