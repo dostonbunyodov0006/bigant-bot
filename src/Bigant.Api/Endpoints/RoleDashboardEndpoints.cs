@@ -59,14 +59,11 @@ public static class RoleDashboardEndpoints
                     d.AmountTotal,
                     d.AmountPaid,
                     Debt = d.AmountTotal - d.AmountPaid,
-                    // DealItem.VatAmount — hisoblanadigan xossa, SQL ga tarjima
-                    // bo'lmaydi. Shuning uchun formulani to'g'ridan-to'g'ri yozamiz.
-                    Vat = d.Items.Sum(i =>
-                        (i.Qty * i.Price - i.DiscountAmount) * i.VatRate / (100m + i.VatRate)),
+                    // QQS Didox hujjatidan keladi — tovar ro'yxati bizda yo'q.
+                    Vat = d.Documents.Where(x => x.DocType == DocType.Esf).Sum(x => x.VatAmount),
                     Status = d.Status.ToString(),
                     d.ContractDate,
                     d.DueDate,
-                    Positions = d.Items.Count,
                     // Hujjat holati — realizatsiya shularni tekshiradi
                     HasEsf = d.Documents.Any(x => x.DocType == DocType.Esf
                                                && x.Status != DocStatus.Cancelled),
@@ -77,13 +74,6 @@ public static class RoleDashboardEndpoints
 
             // ── Tekshirish kerak bo'lgan joylar ──
             var noInn = rows.Where(r => string.IsNullOrWhiteSpace(r.Inn)).Select(r => r.Number).ToList();
-
-            var noMxik = await db.DealItems.AsNoTracking()
-                .Where(i => i.Deal.Kind == DealKind.Sale
-                         && i.Deal.Status == DealStatus.Active
-                         && (i.MxikSnapshot == null || i.MxikSnapshot == ""))
-                .Select(i => new { i.Deal.Number, Product = i.Product.Name })
-                .Take(20).ToListAsync(ct);
 
             var overdue = rows
                 .Where(r => r.Debt > 0 && r.DueDate != null && r.DueDate < today)
@@ -113,7 +103,6 @@ public static class RoleDashboardEndpoints
                 checks = new
                 {
                     withoutInn = noInn,
-                    withoutMxik = noMxik,
                     overduePayments = overdue,
                     withoutEsf = rows.Where(r => r.Status == "Active" && !r.HasEsf)
                                      .Select(r => r.Number).Take(20).ToList(),
@@ -261,6 +250,111 @@ public static class RoleDashboardEndpoints
         });
 
         // ══════════════════════════════════════════════════════════
+        //  30 KUNLIK TO'LIQ HISOBOT — hamma rol ko'radi
+        //  Har rol o'z kesimini oladi, admin ikkalasini ham.
+        // ══════════════════════════════════════════════════════════
+        g.MapGet("/hisobot", async (int? days, AppDbContext db, CurrentUser cu, CancellationToken ct) =>
+        {
+            var actor = await cu.GetAsync(ct);
+            var window = Math.Clamp(days ?? 30, 1, 365);
+
+            var to = UzTime.Today;
+            var from = to.AddDays(-window);
+            var (fromTs, toTs) = UzTime.DayRangeUtc(from, to);
+
+            // Rol kesimi: realizatsiya faqat sotuvni, perehod ikkalasini ko'radi
+            // (chunki hujjat harakati ikkala yo'nalishda ham bo'ladi).
+            DealKind? only = actor.Role == UserRole.Realizatsiya ? DealKind.Sale : null;
+
+            var deals = db.Deals.AsNoTracking()
+                .Where(d => only == null || d.Kind == only);
+
+            // ── Davr ichida ochilgan va yopilganlar ──
+            var opened = await deals.CountAsync(d => d.CreatedAt >= fromTs && d.CreatedAt < toTs, ct);
+            var closed = await deals.CountAsync(d => d.ClosedAt >= fromTs && d.ClosedAt < toTs, ct);
+
+            // ── Hujjat harakati: qaysi turdan nechta kelgan / ketgan ──
+            var docs = await db.Documents.AsNoTracking()
+                .Where(x => x.CreatedAt >= fromTs && x.CreatedAt < toTs
+                         && x.Status != DocStatus.Cancelled)
+                .GroupBy(x => new { x.DocType, x.Direction })
+                .Select(gr => new { gr.Key.DocType, gr.Key.Direction, Count = gr.Count() })
+                .ToListAsync(ct);
+
+            var docRows = DealWorkflow.Chain.Select(t => new
+            {
+                type = t.ToString(),
+                label = DealWorkflow.DocLabel(t),
+                sent = docs.Where(x => x.DocType == t && x.Direction == DocDirection.Out).Sum(x => x.Count),
+                received = docs.Where(x => x.DocType == t && x.Direction == DocDirection.In).Sum(x => x.Count),
+            }).ToList();
+
+            // ── Pul harakati ──
+            var pays = await db.Payments.AsNoTracking()
+                .Where(p2 => p2.PayDate >= from && p2.PayDate <= to)
+                .GroupBy(p2 => p2.Direction)
+                .Select(gr => new { Dir = gr.Key, Total = gr.Sum(x => x.Amount), Count = gr.Count() })
+                .ToListAsync(ct);
+
+            var paidOut = pays.FirstOrDefault(x => x.Dir == PaymentDirection.Out);
+            var paidIn  = pays.FirstOrDefault(x => x.Dir == PaymentDirection.In);
+
+            // ── Kontragent kesimi: kim bilan qancha ishladik, qancha qarz ──
+            var byCp = await deals
+                .Where(d => d.Status == DealStatus.Active || (d.ClosedAt >= fromTs && d.ClosedAt < toTs))
+                .GroupBy(d => new { d.CounterpartyId, d.Counterparty.Name, d.Kind })
+                .Select(gr => new
+                {
+                    name = gr.Key.Name,
+                    kind = gr.Key.Kind.ToString(),
+                    deals = gr.Count(),
+                    total = gr.Sum(x => x.AmountTotal),
+                    paid = gr.Sum(x => x.AmountPaid),
+                    debt = gr.Sum(x => x.AmountTotal - x.AmountPaid),
+                })
+                .OrderByDescending(x => x.debt)
+                .Take(50)
+                .ToListAsync(ct);
+
+            // ── Zanjir sog'ligi ──
+            var chainRows = await db.Documents.AsNoTracking()
+                .Where(x => x.DealId != null && x.Deal!.Status == DealStatus.Active
+                         && x.Status != DocStatus.Cancelled && x.Status != DocStatus.Rejected)
+                .Select(x => new { DealId = x.DealId!.Value, x.Id, x.DocType, x.ParentDocumentId })
+                .ToListAsync(ct);
+
+            var brokenDeals = chainRows.GroupBy(x => x.DealId)
+                .Count(gr => DealWorkflow.CheckChain(
+                    gr.Select(x => (x.DocType, x.Id, x.ParentDocumentId))).Count > 0);
+
+            return Results.Ok(new
+            {
+                period = new { from, to, days = window },
+                scope = only?.ToString() ?? "Hammasi",
+                deals = new
+                {
+                    opened,
+                    closed,
+                    stillOpen = await deals.CountAsync(d => d.Status == DealStatus.Active, ct),
+                },
+                money = new
+                {
+                    paidOutTotal = paidOut?.Total ?? 0m,
+                    paidOutCount = paidOut?.Count ?? 0,
+                    receivedTotal = paidIn?.Total ?? 0m,
+                    receivedCount = paidIn?.Count ?? 0,
+                    weOwe = await deals.Where(d => d.Kind == DealKind.Purchase && d.Status == DealStatus.Active)
+                                       .SumAsync(d => (decimal?)(d.AmountTotal - d.AmountPaid), ct) ?? 0m,
+                    theyOwe = await deals.Where(d => d.Kind == DealKind.Sale && d.Status == DealStatus.Active)
+                                         .SumAsync(d => (decimal?)(d.AmountTotal - d.AmountPaid), ct) ?? 0m,
+                },
+                documents = docRows,
+                chainHealth = new { activeDeals = chainRows.Select(x => x.DealId).Distinct().Count(), broken = brokenDeals },
+                counterparties = byCp,
+            });
+        });
+
+        // ══════════════════════════════════════════════════════════
         //  ADMIN — umumiy manzara, ikkala tomon
         // ══════════════════════════════════════════════════════════
         g.MapGet("/admin", async (AppDbContext db, CurrentUser cu, CancellationToken ct) =>
@@ -315,7 +409,6 @@ public static class RoleDashboardEndpoints
                 counts = new
                 {
                     counterparties = await db.Counterparties.CountAsync(ct),
-                    products = await db.Products.CountAsync(p => p.IsActive, ct),
                     documents = await db.Documents.CountAsync(ct),
                     openDeals = await deals.CountAsync(d => d.Status == DealStatus.Active, ct),
                     closedDeals = await deals.CountAsync(d => d.Status == DealStatus.Closed, ct),

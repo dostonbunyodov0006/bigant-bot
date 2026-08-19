@@ -12,7 +12,7 @@ interface View {
     createdAt: string; stepsDone: number; stepsTotal: number
   }[]
   counts: {
-    counterparties: number; products: number; documents: number
+    counterparties: number; documents: number
     openDeals: number; closedDeals: number
   }
 }
@@ -25,7 +25,7 @@ const ROLE_UZ: Record<string, string> = {
 
 export default function AdminView() {
   const nav = useNavigate()
-  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/admin'), [])
+  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/admin'), [], 15000)
 
   if (loading) return <Loading />
   if (error) return <ErrorBox text={error} />
@@ -126,7 +126,6 @@ export default function AdminView() {
             <div className="card-h"><h2>Bazada</h2></div>
             <dl className="kv">
               <dt>Kontragentlar</dt><dd className="num">{data.counts.counterparties}</dd>
-              <dt>Tovarlar</dt><dd className="num">{data.counts.products}</dd>
               <dt>Hujjatlar</dt><dd className="num">{data.counts.documents}</dd>
               <dt>Ochiq bitim</dt><dd className="num">{data.counts.openDeals}</dd>
               <dt>Yopilgan</dt><dd className="num">{data.counts.closedDeals}</dd>

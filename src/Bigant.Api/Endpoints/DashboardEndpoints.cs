@@ -46,22 +46,5 @@ public static class DashboardEndpoints
             return Results.Ok(await dash.OpenDealsAsync(scope, take ?? 100, ct));
         });
         // ── Katalog sog'lig'i: MXIK'siz tovarlar Didox'ga to'siq ────
-        g.MapGet("/catalog-health", async (AppDbContext db, CancellationToken ct) =>
-        {
-            var total = await db.Products.CountAsync(p => p.IsActive, ct);
-            var noMxik = await db.Products
-                .Include(p => p.Group)
-                .CountAsync(p => p.IsActive
-                              && (p.Mxik == null || p.Mxik == "")
-                              && (p.Group == null || p.Group.Mxik == null || p.Group.Mxik == ""), ct);
-
-            return Results.Ok(new
-            {
-                totalProducts = total,
-                withoutMxik = noMxik,
-
-                readyPercent = total == 0 ? 0 : Math.Round((total - noMxik) * 100m / total, 1)
-            });
-        });
     }
 }

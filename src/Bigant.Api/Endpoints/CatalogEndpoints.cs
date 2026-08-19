@@ -20,16 +20,7 @@ public static class CatalogEndpoints
         string? ContactPerson, string? ContactPhone, string? WorkPhone,
         int PaymentDays);
 
-    public sealed record UpsertProduct(long? Id, long? GroupId, string? Article, string Name,
-        string? Brand, string? Barcode,
-        // Didox: MXIK berilsa PackageCode majburiy, berilmasa MeasureId majburiy
-        string? Mxik, string? MxikName, string Unit,
-        string? MeasureId, string? PackageCode, string? PackageName,
-        decimal? PackageQty, decimal? VatRate, decimal ExciseRate, decimal BasePrice,
-        string? Currency,
-        bool IsPriceFixed);
-
-
+    
     public static void MapCatalogEndpoints(this WebApplication app)
     {
         // ── KONTRAGENTLAR ───────────────────────────────────────────
@@ -115,120 +106,5 @@ public static class CatalogEndpoints
         });
 
         // ── TOVAR GURUHLARI ─────────────────────────────────────────
-        var gr = app.MapGroup("/api/product-groups").WithTags("Katalog").RequireAuthorization();
-
-        gr.MapGet("", async (AppDbContext db, CancellationToken ct) =>
-            Results.Ok(await db.ProductGroups.AsNoTracking()
-                .OrderBy(g => g.Name)
-                .Select(g => new { g.Id, g.Name, g.ParentId, g.Mxik, g.VatRate,
-                                   products = g.Products.Count })
-                .ToListAsync(ct)));
-
-        gr.MapPost("", async (ProductGroup req, CurrentUser cu, AppDbContext db, CancellationToken ct) =>
-        {
-            if (req.Id == 0) db.ProductGroups.Add(req);
-            else db.ProductGroups.Update(req);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { req.Id });
-        });
-
-        // ── TOVARLAR ────────────────────────────────────────────────
-        var pr = app.MapGroup("/api/products").WithTags("Katalog").RequireAuthorization();
-
-        // 5000+ tovarni tez qidirish (pg_trgm indeksi bilan).
-        pr.MapGet("", async (string? q, long? groupId, bool? noMxik, int? take,
-                             AppDbContext db, CancellationToken ct) =>
-        {
-            var query = db.Products.AsNoTracking().Include(p => p.Group).Where(p => p.IsActive);
-
-            if (!string.IsNullOrWhiteSpace(q))
-                query = query.Where(p => EF.Functions.ILike(p.Name, $"%{q}%")
-                                      || p.Article == q || p.Barcode == q);
-            if (groupId is { } gid) query = query.Where(p => p.GroupId == gid);
-
-            // MXIK to'ldirilmagan tovarlarni topish — katalogni tozalash uchun.
-            if (noMxik == true)
-                query = query.Where(p => (p.Mxik == null || p.Mxik == "")
-                                      && (p.Group == null || p.Group.Mxik == null || p.Group.Mxik == ""));
-
-            var rows = await query.OrderBy(p => p.Name).Take(Math.Clamp(take ?? 50, 1, 500)).ToListAsync(ct);
-
-            return Results.Ok(rows.Select(p => new
-            {
-                p.Id, p.Article, p.Name, p.Brand, p.Unit, p.BasePrice, p.Currency,
-                p.IsPriceFixed,
-                mxik = p.EffectiveMxik,
-                vatRate = p.EffectiveVatRate,
-                group = p.Group?.Name
-            }));
-        });
-
-        pr.MapPost("", async (UpsertProduct req, CurrentUser cu, AppDbContext db,
-                              IAuditService audit, CancellationToken ct) =>
-        {
-            var actor = await cu.GetAsync(ct);
-            if (!string.IsNullOrWhiteSpace(req.Mxik) && req.Mxik.Length != 17)
-                throw new BusinessException("BAD_MXIK", "MXIK 17 ta raqamdan iborat bo'ladi");
-
-            var p = req.Id is { } id
-                ? await db.Products.FirstOrDefaultAsync(x => x.Id == id, ct)
-                  ?? throw new BusinessException("NOT_FOUND", "Tovar topilmadi")
-                : new Product();
-
-            p.GroupId = req.GroupId; p.Article = req.Article; p.Name = req.Name;
-            p.Brand = req.Brand; p.Barcode = req.Barcode; p.Mxik = req.Mxik;
-            p.MxikName = req.MxikName; p.Unit = req.Unit;
-            p.MeasureId = req.MeasureId; p.PackageCode = req.PackageCode; p.PackageName = req.PackageName;
-            p.PackageQty = req.PackageQty;
-            p.VatRate = req.VatRate; p.ExciseRate = req.ExciseRate; p.BasePrice = req.BasePrice;
-            p.Currency = string.IsNullOrWhiteSpace(req.Currency) ? "UZS" : req.Currency.ToUpperInvariant();
-            p.IsPriceFixed = req.IsPriceFixed;
-
-            if (req.Id is null) db.Products.Add(p);
-            audit.Write(actor.Id, nameof(Product), req.Id, req.Id is null ? "create" : "update");
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { p.Id });
-        });
-
-        /// Katalogni ommaviy yuklash (Excel'dan CSV qilib).
-        pr.MapPost("/bulk", async (List<UpsertProduct> rows, CurrentUser cu, AppDbContext db,
-                                   CancellationToken ct) =>
-        {
-            var actor = await cu.GetAsync(ct);
-            if (actor.Role is not (UserRole.Admin or UserRole.Realizatsiya or UserRole.Perehod))
-                throw new BusinessException("FORBIDDEN", "Ruxsat yo'q");
-
-            var created = 0; var updated = 0;
-            foreach (var r in rows)
-            {
-                var existing = r.Article is null ? null
-                    : await db.Products.FirstOrDefaultAsync(p => p.Article == r.Article, ct);
-
-                if (existing is null)
-                {
-                    db.Products.Add(new Product
-                    {
-                        GroupId = r.GroupId, Article = r.Article, Name = r.Name, Brand = r.Brand,
-                        Barcode = r.Barcode, Mxik = r.Mxik, MxikName = r.MxikName, Unit = r.Unit,
-                        MeasureId = r.MeasureId, PackageCode = r.PackageCode, PackageName = r.PackageName,
-                        PackageQty = r.PackageQty, VatRate = r.VatRate, ExciseRate = r.ExciseRate,
-                        BasePrice = r.BasePrice,
-                        Currency = string.IsNullOrWhiteSpace(r.Currency) ? "UZS" : r.Currency.ToUpperInvariant(),
-                        IsPriceFixed = r.IsPriceFixed
-                    });
-                    created++;
-                }
-                else
-                {
-                    existing.Name = r.Name; existing.BasePrice = r.BasePrice;
-                    existing.Currency = string.IsNullOrWhiteSpace(r.Currency) ? existing.Currency : r.Currency.ToUpperInvariant();
-                    existing.Mxik = r.Mxik ?? existing.Mxik;
-                    existing.Unit = r.Unit; existing.GroupId = r.GroupId ?? existing.GroupId;
-                    updated++;
-                }
-            }
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(new { created, updated });
-        });
     }
 }

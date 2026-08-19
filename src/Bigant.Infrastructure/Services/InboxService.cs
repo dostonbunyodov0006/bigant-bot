@@ -82,6 +82,13 @@ public sealed class InboxService : IInboxService
             ParentDocumentId = await ResolveParentAsync(inc, deal.Id, priorChain, ct),
             Payload = SafeParse(inc.RawJson)
         };
+        // DOVERENNOST MUDDATI — Didox javobidan o'qiladi.
+        // Ilgari bu ma'lumot biz doverennost chiqarganda to'lardi. Endi hujjat
+        // Didox'da yaratiladi, shuning uchun muddatni xom JSON dan olamiz —
+        // busiz «muddat tugayapti» ogohlantirishi umuman ishlamaydi.
+        if (inc.DocType == DocType.Doverennost)
+            doc.Doverennost = BuildDoverennostInfo(inc);
+
         _db.Documents.Add(doc);
         await _db.SaveChangesAsync(ct);
 
@@ -141,6 +148,55 @@ public sealed class InboxService : IInboxService
 
         _log.LogInformation("Kiruvchi hujjat ro'yxatga olindi: {Type} №{Number}", inc.DocType, inc.DocNumber);
         return doc;
+    }
+
+    /// <summary>
+    /// Didox javobidan doverennost tafsilotlarini yig'adi: ishonchli shaxs va
+    /// AMAL QILISH MUDDATI. Muddat topilmasa 10 kun deb olinadi — O'zbekistonda
+    /// odatiy muddat shu; bunda ogohlantirish baribir ishlaydi, faqat sana
+    /// taxminiy bo'ladi va bugalter kartochkada to'g'rilay oladi.
+    ///
+    /// TODO(didox): maydon nomlari rasmiy hujjatdan tasdiqlansin.
+    /// </summary>
+    private static DoverennostInfo BuildDoverennostInfo(IncomingDocument inc)
+    {
+        var (name, pinfl, until) = ReadEmpowerment(inc.RawJson);
+
+        return new DoverennostInfo
+        {
+            EmployeeName = name ?? "—",
+            EmployeePinfl = pinfl ?? "",
+            ValidUntil = until ?? inc.DocDate.AddDays(10),
+        };
+    }
+
+    private static (string? Name, string? Pinfl, DateOnly? Until) ReadEmpowerment(string rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson) || rawJson == "{}") return (null, null, null);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            var root = doc.RootElement;
+
+            string? Find(string block, params string[] fields)
+            {
+                if (!root.TryGetProperty(block, out var b) || b.ValueKind != JsonValueKind.Object)
+                    return null;
+                foreach (var f in fields)
+                    if (b.TryGetProperty(f, out var v) && v.ValueKind == JsonValueKind.String)
+                        return v.GetString();
+                return null;
+            }
+
+            var until = Find("EmpowermentDoc", "DateOfExpire", "ExpireDate", "ValidUntil");
+            var name = Find("Agent", "FullName", "Name");
+            var pinfl = Find("Agent", "Pinfl", "PINFL");
+
+            DateOnly? parsed = DateOnly.TryParse(until, out var d) ? d : null;
+            return (name, pinfl, parsed);
+        }
+        catch (JsonException) { return (null, null, null); }
     }
 
     /// <summary>
@@ -336,17 +392,26 @@ public sealed class InboxService : IInboxService
             // Bu qat'iy qoida: xarid bitimiga yopishtirish zanjirni buzadi
             // (2026-08-18 testda aynan shu bo'lgan — klient doverennosti
             //  xarid kartochkasiga tushib ketgan edi).
+            // Doverennostni HAR DOIM xaridor chiqaradi — shuning uchun yo'nalish
+            // bitim turini aniq belgilaydi:
+            //   bizga KELDI  → xaridor ular → bu bizning SOTUVimiz
+            //   biz YUBORDIK → xaridor biz  → bu XARID
+            // Yo'nalishni hisobga olmasak doverennost noto'g'ri bitimga tushadi
+            // va zanjir buziladi (2026-08-19 testda aynan shu bo'lgan).
             List<Deal> candidates;
             if (inc.DocType == DocType.Doverennost)
             {
-                candidates = open.Where(d => d.Kind == DealKind.Sale).ToList();
-                // Sotuv bitimi topilmasa — xaridga YOPISHTIRMAYMIZ, yangisini ochamiz.
+                var want = inc.Direction == DocDirection.Out ? DealKind.Purchase : DealKind.Sale;
+                candidates = open.Where(d => d.Kind == want).ToList();
+
+                // Mos bitim topilmasa — boshqasiga YOPISHTIRMAYMIZ, yangisini ochamiz.
                 if (candidates.Count == 0)
-                    return await CreateDealAsync(inc, sender.Id, DealKind.Sale, ct);
+                    return await CreateDealAsync(inc, sender.Id, want, ct);
             }
             else
             {
-                candidates = open.Where(d => d.Kind == DealKind.Purchase).ToList();
+                var want = inc.Direction == DocDirection.Out ? DealKind.Sale : DealKind.Purchase;
+                candidates = open.Where(d => d.Kind == want).ToList();
                 if (candidates.Count == 0) candidates = open;
             }
 

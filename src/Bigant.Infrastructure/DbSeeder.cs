@@ -55,20 +55,6 @@ public static class DbSeeder
                 "INN, direktor F.I.Sh va PINFL, h/r, MFO, OKED.");
         }
 
-        if (!await db.ProductGroups.AnyAsync(ct))
-        {
-            // MXIK va PackageCode namuna uchun bo'sh — bugalter to'ldiradi.
-            db.ProductGroups.AddRange(
-                new ProductGroup { Name = "Trubalar (PPR, PVX, metall)", VatRate = 12 },
-                new ProductGroup { Name = "Fitinglar va o'tkazgichlar", VatRate = 12 },
-                new ProductGroup { Name = "Elektr shchitlari", VatRate = 12 },
-                new ProductGroup { Name = "Vyklyuchatel va rozetkalar", VatRate = 12 },
-                new ProductGroup { Name = "Kabel va simlar", VatRate = 12 },
-                new ProductGroup { Name = "Santexnika armaturasi", VatRate = 12 });
-            await db.SaveChangesAsync(ct);
-            log.LogInformation("Boshlang'ich tovar guruhlari qo'shildi");
-        }
-
         if (!await db.ContractTemplates.AnyAsync(ct))
         {
             // Didox dogovorni Parts[] siz qabul qilmaydi.

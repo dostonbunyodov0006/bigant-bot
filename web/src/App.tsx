@@ -1,11 +1,13 @@
 import { useEffect } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth, initials, roleName } from './lib/auth'
-import type { Role } from './lib/api'
+import { useAsync } from './lib/ui'
+import { api, type Role } from './lib/api'
 import Login from './pages/Login'
 import Realizatsiya from './pages/Realizatsiya'
 import Perehod from './pages/Perehod'
 import AdminView from './pages/AdminView'
+import Hisobot from './pages/Hisobot'
 import Deals from './pages/Deals'
 import DealCardPage from './pages/DealCard'
 import Inbox from './pages/Inbox'
@@ -34,6 +36,9 @@ const NAV: NavItem[] = [
   { to: '/admin', label: 'Umumiy manzara', hint: 'hamma bitim, ikkala yo\'nalish',
     ic: '▣', roles: ['Admin'], group: 'Mening ishim' },
 
+  { to: '/hisobot', label: 'Hisobot', hint: '30 kunlik to\'liq manzara',
+    ic: '▤', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Mening ishim' },
+
   { to: '/deals', label: 'Shartnomalar', hint: 'to\'liq ro\'yxat va kartochka',
     ic: '≡', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Hujjatlar' },
   { to: '/inbox', label: 'Kiruvchi', hint: 'Didoxdan kelgan hujjatlar',
@@ -49,6 +54,7 @@ const TITLES: Record<string, [string, string]> = {
   '/realizatsiya': ['Realizatsiya buxgalteriyasi', 'sotuv hujjatlari va hisob-kitob'],
   '/perehod': ['Perehod buxgalteriyasi', 'hujjatlar harakati va zanjir'],
   '/admin': ['Umumiy manzara', 'hamma bitim bir joyda'],
+  '/hisobot': ['Hisobot', 'davr bo\'yicha to\'liq manzara'],
   '/deals': ['Shartnomalar', 'sotuv va xarid'],
   '/inbox': ['Kiruvchi hujjatlar', 'postavshikdan va klientdan'],
   '/notifications': ['Eslatmalar', 'e\'tibor talab qiladigan holatlar'],
@@ -65,6 +71,10 @@ const HOME: Record<Role, string> = {
 function Shell() {
   const { me, logout } = useAuth()
   const loc = useLocation()
+
+  // O'qilmagan eslatma soni — Telegramga ketgan xabar shu yerda ham sanaladi.
+  const { data: notif } = useAsync<{ unread: number }>(
+    () => api.get('/api/notifications?take=1'), [], 15000)
 
   // Rol tusini butun sahifaga beramiz — foydalanuvchi qaysi ekranda
   // turganini rangdan ham sezadi.
@@ -101,6 +111,8 @@ function Shell() {
                   className={({ isActive }) => (isActive ? 'on' : '')}>
                   <span className="ic">{i.ic}</span>
                   {i.label}
+                  {i.to === '/notifications' && (notif?.unread ?? 0) > 0 &&
+                    <span className="badge">{notif!.unread}</span>}
                 </NavLink>
               ))}
             </div>
@@ -134,6 +146,7 @@ function Shell() {
             <Route path="/realizatsiya" element={<Guard ok={me.role !== 'Perehod'}><Realizatsiya /></Guard>} />
             <Route path="/perehod" element={<Guard ok={me.role !== 'Realizatsiya'}><Perehod /></Guard>} />
             <Route path="/admin" element={<Guard ok={me.role === 'Admin'}><AdminView /></Guard>} />
+            <Route path="/hisobot" element={<Hisobot />} />
             <Route path="/deals" element={<Deals />} />
             <Route path="/deals/:id" element={<DealCardPage />} />
             <Route path="/inbox" element={<Guard ok={me.role !== 'Realizatsiya'}><Inbox /></Guard>} />

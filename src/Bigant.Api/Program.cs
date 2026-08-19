@@ -67,7 +67,6 @@ builder.Services.AddScoped<INumberGenerator, NumberGenerator>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IDealService, DealService>();
-builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IPaymentService, PaymentService>();
 builder.Services.AddScoped<IInboxService, InboxService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
@@ -232,14 +231,11 @@ app.MapAuthEndpoints();
 app.MapDirectoryEndpoints();
 app.MapCatalogEndpoints();
 app.MapDealEndpoints();
-app.MapDocumentEndpoints();
 app.MapPaymentEndpoints();
 app.MapInboxEndpoints();
 app.MapNotificationEndpoints();
 app.MapDashboardEndpoints();
 app.MapRoleDashboardEndpoints();
-app.MapRateEndpoints();
-app.MapImportEndpoints();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", didox = didoxOptions.Enabled }))
    .AllowAnonymous();

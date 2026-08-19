@@ -29,7 +29,7 @@ interface View {
 
 export default function Perehod() {
   const nav = useNavigate()
-  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/perehod'), [])
+  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/perehod'), [], 15000)
 
   if (loading) return <Loading />
   if (error) return <ErrorBox text={error} />

@@ -9,10 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<Counterparty> Counterparties => Set<Counterparty>();
-    public DbSet<ProductGroup> ProductGroups => Set<ProductGroup>();
-    public DbSet<Product> Products => Set<Product>();
     public DbSet<Deal> Deals => Set<Deal>();
-    public DbSet<DealItem> DealItems => Set<DealItem>();
     public DbSet<DealStep> DealSteps => Set<DealStep>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<OutboxItem> Outbox => Set<OutboxItem>();
@@ -30,7 +27,6 @@ public class AppDbContext : DbContext
     public DbSet<ContractTemplatePart> ContractTemplateParts => Set<ContractTemplatePart>();
     public DbSet<DocumentFile> DocumentFiles => Set<DocumentFile>();
     public DbSet<IntegrationLog> IntegrationLogs => Set<IntegrationLog>();
-    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -81,44 +77,7 @@ public class AppDbContext : DbContext
         });
 
         // ── Catalog ─────────────────────────────────────────────
-        b.Entity<ProductGroup>(e =>
-        {
-            e.ToTable("product_groups");
-            e.Property(x => x.Name).HasMaxLength(200).IsRequired();
-            e.Property(x => x.Mxik).HasMaxLength(17);
-            e.Property(x => x.VatRate).HasPrecision(5, 2);
-            e.HasOne(x => x.Parent).WithMany().HasForeignKey(x => x.ParentId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
 
-        b.Entity<Product>(e =>
-        {
-            e.ToTable("products");
-            e.Property(x => x.Name).HasMaxLength(400).IsRequired();
-            e.Property(x => x.Article).HasMaxLength(64);
-            e.Property(x => x.Brand).HasMaxLength(100);
-            e.Property(x => x.Barcode).HasMaxLength(64);
-            e.Property(x => x.Mxik).HasMaxLength(17);
-            e.Property(x => x.MxikName).HasMaxLength(400);
-            e.Property(x => x.Unit).HasMaxLength(32).IsRequired();
-            e.Property(x => x.MeasureId).HasMaxLength(16);
-            e.Property(x => x.PackageCode).HasMaxLength(16);
-            e.Property(x => x.PackageName).HasMaxLength(64);
-            e.Property(x => x.PackageQty).HasPrecision(18, 3);
-            e.Property(x => x.VatRate).HasPrecision(5, 2);
-            e.Property(x => x.ExciseRate).HasPrecision(5, 2);
-            e.Property(x => x.BasePrice).HasPrecision(18, 2);
-            e.Property(x => x.Currency).HasMaxLength(3).IsRequired();
-            e.Ignore(x => x.EffectiveMxik);
-            e.Ignore(x => x.EffectiveVatRate);
-            e.Ignore(x => x.IsReadyForDidox);
-            e.Ignore(x => x.DidoxProblem);
-            e.HasOne(x => x.Group).WithMany(g => g.Products).HasForeignKey(x => x.GroupId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasIndex(x => x.Article);
-            e.HasIndex(x => x.Barcode);
-            e.HasIndex(x => x.Name).HasMethod("gin").HasOperators("gin_trgm_ops");
-        });
 
         // ── Deals ───────────────────────────────────────────────
         b.Entity<Deal>(e =>
@@ -134,7 +93,6 @@ public class AppDbContext : DbContext
             e.Property(x => x.ContractPlace).HasMaxLength(200);
             e.Property(x => x.DeliveryAddress).HasMaxLength(500);
             e.Property(x => x.DeliveryTerms).HasMaxLength(200);
-            e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.Comment).HasMaxLength(2000);
             e.Ignore(x => x.AmountUnpaid);
             e.Ignore(x => x.AgeDays);
@@ -152,31 +110,6 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        b.Entity<DealItem>(e =>
-        {
-            e.ToTable("deal_items");
-            e.Property(x => x.Qty).HasPrecision(18, 3);
-            e.Property(x => x.Price).HasPrecision(18, 2);
-            e.Property(x => x.VatRate).HasPrecision(5, 2);
-            e.Property(x => x.RateSnapshot).HasPrecision(14, 4);
-            e.Property(x => x.MxikSnapshot).HasMaxLength(17);
-            e.Property(x => x.UnitSnapshot).HasMaxLength(32);
-            e.Property(x => x.UnitCodeSnapshot).HasMaxLength(16);
-            e.Property(x => x.NameSnapshot).HasMaxLength(400);
-            e.Property(x => x.DiscountAmount).HasPrecision(18, 2);
-            e.Property(x => x.ExciseRate).HasPrecision(5, 2);
-            e.Property(x => x.ExciseAmount).HasPrecision(18, 2);
-            e.Property(x => x.PackageCode).HasMaxLength(16);
-            e.Property(x => x.MarkingCode).HasMaxLength(64);
-            e.Ignore(x => x.Amount);
-            e.Ignore(x => x.GrossAmount);
-            e.Ignore(x => x.NetAmount);
-            e.Ignore(x => x.VatAmount);
-            e.HasOne(x => x.Deal).WithMany(d => d.Items).HasForeignKey(x => x.DealId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
 
         b.Entity<DealStep>(e =>
         {
@@ -426,14 +359,6 @@ public class AppDbContext : DbContext
         });
 
         // ── Valyuta kursi ────────────────────────────────────────
-        b.Entity<ExchangeRate>(e =>
-        {
-            e.ToTable("exchange_rates");
-            e.Property(x => x.Rate).HasPrecision(14, 4);
-            e.Property(x => x.Note).HasMaxLength(500);
-            // «Joriy kurs» = eng oxirgi yozuv.
-            e.HasIndex(x => x.EffectiveFrom);
-        });
 
         // ── Support ─────────────────────────────────────────────
         b.Entity<NumberCounter>(e =>

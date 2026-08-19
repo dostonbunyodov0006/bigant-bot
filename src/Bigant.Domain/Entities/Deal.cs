@@ -78,15 +78,11 @@ public class Deal
     /// <summary>Yetkazib berish sharti: "o'zi olib ketadi", "biz yetkazamiz", "tashuvchi orqali".</summary>
     public string? DeliveryTerms { get; set; }
 
-    /// <summary>Valyuta. Deyarli doim UZS, lekin import bo'lsa kerak bo'ladi.</summary>
-    public string Currency { get; set; } = "UZS";
-
     public string? Comment { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ClosedAt { get; set; }
 
-    public List<DealItem> Items { get; set; } = [];
     public List<DealStep> Steps { get; set; } = [];
     public List<Document> Documents { get; set; } = [];
     public List<Payment> Payments { get; set; } = [];
@@ -98,54 +94,6 @@ public class Deal
     /// <summary>Barcha majburiy qadam bajarildimi.</summary>
     public bool AllRequiredStepsDone =>
         Steps.Where(s => s.IsRequired).All(s => s.Status == StepStatus.Done);
-}
-
-public class DealItem
-{
-    public long Id { get; set; }
-    public long DealId { get; set; }
-    public Deal Deal { get; set; } = default!;
-
-    public long ProductId { get; set; }
-    public Product Product { get; set; } = default!;
-
-    public decimal Qty { get; set; }
-    public decimal Price { get; set; }
-    public decimal VatRate { get; set; } = 12m;
-
-
-    /// <summary>
-    /// Shartnoma paytidagi kurs. Narx у.е. da bo'lsa shu bilan so'mga o'girilgan.
-    /// MUZLATILGAN: kurs keyin o'zgarsa ham chiqarilgan faktura o'zgarmaydi.
-    /// null = tovar allaqachon so'mda edi.
-    /// </summary>
-    public decimal? RateSnapshot { get; set; }
-
-    /// <summary>Faktura payloadiga ketadigan qiymatlar — buyurtma paytida muzlatiladi.</summary>
-    public string? MxikSnapshot { get; set; }
-    public string? UnitSnapshot { get; set; }
-    public string? UnitCodeSnapshot { get; set; }
-    public string? NameSnapshot { get; set; }
-
-    /// <summary>Qator bo'yicha chegirma summasi (QQS'gacha).</summary>
-    public decimal DiscountAmount { get; set; }
-
-    /// <summary>Aksiz stavkasi (%) — aksizli tovarlar uchun.</summary>
-    public decimal ExciseRate { get; set; }
-    public decimal ExciseAmount { get; set; }
-
-    /// <summary>O'rash (upakovka) kodi — soliq klassifikatoridan.</summary>
-    public string? PackageCode { get; set; }
-    /// <summary>Markirovka belgisi (aksiz markasi, dori, ichimlik). Bo'lmasa bo'sh.</summary>
-    public string? MarkingCode { get; set; }
-
-    /// <summary>Chegirmasiz qiymat.</summary>
-    public decimal GrossAmount => Math.Round(Qty * Price, 2);
-    /// <summary>Chegirma hisobga olingan yakuniy summa (QQS bilan).</summary>
-    public decimal Amount => Math.Round(GrossAmount - DiscountAmount, 2);
-    public decimal VatAmount => Math.Round(Amount * VatRate / (100m + VatRate), 2);
-    /// <summary>QQS'siz yetkazib berish summasi — fakturada alohida ustun.</summary>
-    public decimal NetAmount => Math.Round(Amount - VatAmount, 2);
 }
 
 /// <summary>

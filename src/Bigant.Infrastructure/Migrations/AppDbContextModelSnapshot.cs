@@ -612,12 +612,6 @@ namespace Bigant.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)")
-                        .HasColumnName("currency");
-
                     b.Property<string>("DeliveryAddress")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)")
@@ -699,100 +693,6 @@ namespace Bigant.Infrastructure.Migrations
                         .HasDatabaseName("i_x_deals_status_created_at");
 
                     b.ToTable("deals", (string)null);
-                });
-
-            modelBuilder.Entity("Bigant.Domain.Entities.DealItem", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<long>("DealId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("deal_id");
-
-                    b.Property<decimal>("DiscountAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)")
-                        .HasColumnName("discount_amount");
-
-                    b.Property<decimal>("ExciseAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)")
-                        .HasColumnName("excise_amount");
-
-                    b.Property<decimal>("ExciseRate")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("numeric(5,2)")
-                        .HasColumnName("excise_rate");
-
-                    b.Property<string>("MarkingCode")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("marking_code");
-
-                    b.Property<string>("MxikSnapshot")
-                        .HasMaxLength(17)
-                        .HasColumnType("character varying(17)")
-                        .HasColumnName("mxik_snapshot");
-
-                    b.Property<string>("NameSnapshot")
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)")
-                        .HasColumnName("name_snapshot");
-
-                    b.Property<string>("PackageCode")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("package_code");
-
-                    b.Property<decimal>("Price")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)")
-                        .HasColumnName("price");
-
-                    b.Property<long>("ProductId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("product_id");
-
-                    b.Property<decimal>("Qty")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("numeric(18,3)")
-                        .HasColumnName("qty");
-
-                    b.Property<decimal?>("RateSnapshot")
-                        .HasPrecision(14, 4)
-                        .HasColumnType("numeric(14,4)")
-                        .HasColumnName("rate_snapshot");
-
-                    b.Property<string>("UnitCodeSnapshot")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("unit_code_snapshot");
-
-                    b.Property<string>("UnitSnapshot")
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("unit_snapshot");
-
-                    b.Property<decimal>("VatRate")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("numeric(5,2)")
-                        .HasColumnName("vat_rate");
-
-                    b.HasKey("Id")
-                        .HasName("p_k_deal_items");
-
-                    b.HasIndex("DealId")
-                        .HasDatabaseName("i_x_deal_items_deal_id");
-
-                    b.HasIndex("ProductId")
-                        .HasDatabaseName("i_x_deal_items_product_id");
-
-                    b.ToTable("deal_items", (string)null);
                 });
 
             modelBuilder.Entity("Bigant.Domain.Entities.DealStep", b =>
@@ -1210,46 +1110,6 @@ namespace Bigant.Infrastructure.Migrations
                     b.ToTable("employees", (string)null);
                 });
 
-            modelBuilder.Entity("Bigant.Domain.Entities.ExchangeRate", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<long?>("CreatedByUserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("created_by_user_id");
-
-                    b.Property<DateTimeOffset>("EffectiveFrom")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("effective_from");
-
-                    b.Property<string>("Note")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("note");
-
-                    b.Property<decimal>("Rate")
-                        .HasPrecision(14, 4)
-                        .HasColumnType("numeric(14,4)")
-                        .HasColumnName("rate");
-
-                    b.HasKey("Id")
-                        .HasName("p_k_exchange_rates");
-
-                    b.HasIndex("EffectiveFrom")
-                        .HasDatabaseName("i_x_exchange_rates_effective_from");
-
-                    b.ToTable("exchange_rates", (string)null);
-                });
-
             modelBuilder.Entity("Bigant.Domain.Entities.IntegrationLog", b =>
                 {
                     b.Property<long>("Id")
@@ -1544,172 +1404,6 @@ namespace Bigant.Infrastructure.Migrations
                     b.ToTable("payments", (string)null);
                 });
 
-            modelBuilder.Entity("Bigant.Domain.Entities.Product", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Article")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("article");
-
-                    b.Property<string>("Barcode")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("barcode");
-
-                    b.Property<decimal>("BasePrice")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("numeric(18,2)")
-                        .HasColumnName("base_price");
-
-                    b.Property<string>("Brand")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("brand");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)")
-                        .HasColumnName("currency");
-
-                    b.Property<decimal>("ExciseRate")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("numeric(5,2)")
-                        .HasColumnName("excise_rate");
-
-                    b.Property<long?>("GroupId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("group_id");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_active");
-
-                    b.Property<bool>("IsPriceFixed")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_price_fixed");
-
-                    b.Property<string>("MeasureId")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("measure_id");
-
-                    b.Property<string>("Mxik")
-                        .HasMaxLength(17)
-                        .HasColumnType("character varying(17)")
-                        .HasColumnName("mxik");
-
-                    b.Property<string>("MxikName")
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)")
-                        .HasColumnName("mxik_name");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)")
-                        .HasColumnName("name");
-
-                    b.Property<int>("Origin")
-                        .HasColumnType("integer")
-                        .HasColumnName("origin");
-
-                    b.Property<string>("PackageCode")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)")
-                        .HasColumnName("package_code");
-
-                    b.Property<string>("PackageName")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("package_name");
-
-                    b.Property<decimal?>("PackageQty")
-                        .HasPrecision(18, 3)
-                        .HasColumnType("numeric(18,3)")
-                        .HasColumnName("package_qty");
-
-                    b.Property<string>("Unit")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("unit");
-
-                    b.Property<decimal?>("VatRate")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("numeric(5,2)")
-                        .HasColumnName("vat_rate");
-
-                    b.HasKey("Id")
-                        .HasName("p_k_products");
-
-                    b.HasIndex("Article")
-                        .HasDatabaseName("i_x_products_article");
-
-                    b.HasIndex("Barcode")
-                        .HasDatabaseName("i_x_products_barcode");
-
-                    b.HasIndex("GroupId")
-                        .HasDatabaseName("i_x_products_group_id");
-
-                    b.HasIndex("Name")
-                        .HasDatabaseName("i_x_products_name");
-
-                    NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("Name"), "gin");
-                    NpgsqlIndexBuilderExtensions.HasOperators(b.HasIndex("Name"), new[] { "gin_trgm_ops" });
-
-                    b.ToTable("products", (string)null);
-                });
-
-            modelBuilder.Entity("Bigant.Domain.Entities.ProductGroup", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Mxik")
-                        .HasMaxLength(17)
-                        .HasColumnType("character varying(17)")
-                        .HasColumnName("mxik");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("name");
-
-                    b.Property<long?>("ParentId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("parent_id");
-
-                    b.Property<decimal>("VatRate")
-                        .HasPrecision(5, 2)
-                        .HasColumnType("numeric(5,2)")
-                        .HasColumnName("vat_rate");
-
-                    b.HasKey("Id")
-                        .HasName("p_k_product_groups");
-
-                    b.HasIndex("ParentId")
-                        .HasDatabaseName("i_x_product_groups_parent_id");
-
-                    b.ToTable("product_groups", (string)null);
-                });
-
             modelBuilder.Entity("Bigant.Domain.Entities.TtnInfo", b =>
                 {
                     b.Property<long>("Id")
@@ -1988,27 +1682,6 @@ namespace Bigant.Infrastructure.Migrations
                     b.Navigation("ParentDeal");
                 });
 
-            modelBuilder.Entity("Bigant.Domain.Entities.DealItem", b =>
-                {
-                    b.HasOne("Bigant.Domain.Entities.Deal", "Deal")
-                        .WithMany("Items")
-                        .HasForeignKey("DealId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("f_k_deal_items_deals_deal_id");
-
-                    b.HasOne("Bigant.Domain.Entities.Product", "Product")
-                        .WithMany()
-                        .HasForeignKey("ProductId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired()
-                        .HasConstraintName("f_k_deal_items_products_product_id");
-
-                    b.Navigation("Deal");
-
-                    b.Navigation("Product");
-                });
-
             modelBuilder.Entity("Bigant.Domain.Entities.DealStep", b =>
                 {
                     b.HasOne("Bigant.Domain.Entities.Deal", "Deal")
@@ -2131,28 +1804,6 @@ namespace Bigant.Infrastructure.Migrations
                     b.Navigation("Deal");
                 });
 
-            modelBuilder.Entity("Bigant.Domain.Entities.Product", b =>
-                {
-                    b.HasOne("Bigant.Domain.Entities.ProductGroup", "Group")
-                        .WithMany("Products")
-                        .HasForeignKey("GroupId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("f_k_products_product_groups_group_id");
-
-                    b.Navigation("Group");
-                });
-
-            modelBuilder.Entity("Bigant.Domain.Entities.ProductGroup", b =>
-                {
-                    b.HasOne("Bigant.Domain.Entities.ProductGroup", "Parent")
-                        .WithMany()
-                        .HasForeignKey("ParentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .HasConstraintName("f_k_product_groups_product_groups_parent_id");
-
-                    b.Navigation("Parent");
-                });
-
             modelBuilder.Entity("Bigant.Domain.Entities.TtnInfo", b =>
                 {
                     b.HasOne("Bigant.Domain.Entities.Document", "Document")
@@ -2192,8 +1843,6 @@ namespace Bigant.Infrastructure.Migrations
 
                     b.Navigation("Documents");
 
-                    b.Navigation("Items");
-
                     b.Navigation("Parts");
 
                     b.Navigation("Payments");
@@ -2206,11 +1855,6 @@ namespace Bigant.Infrastructure.Migrations
                     b.Navigation("Doverennost");
 
                     b.Navigation("Ttn");
-                });
-
-            modelBuilder.Entity("Bigant.Domain.Entities.ProductGroup", b =>
-                {
-                    b.Navigation("Products");
                 });
 #pragma warning restore 612, 618
         }

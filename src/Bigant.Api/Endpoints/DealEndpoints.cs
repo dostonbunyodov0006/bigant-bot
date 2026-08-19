@@ -70,13 +70,6 @@ public static class DealEndpoints
                     s.IsRequired, s.DueDate, s.CompletedAt, s.DocumentId, s.IsOverdue, s.Note
                 }),
 
-                items = d.Items.Select(i => new
-                {
-                    i.Id, product = i.Product.Name, i.Qty, unit = i.UnitSnapshot,
-                    i.Price, i.Amount, i.VatRate, i.VatAmount,
-                    mxik = i.MxikSnapshot
-                }),
-
                 documents = d.Documents.Select(x => new
                 {
                     x.Id, type = x.DocType.ToString(), label = DealWorkflow.DocLabel(x.DocType),
@@ -92,13 +85,6 @@ public static class DealEndpoints
         });
 
         // ── Yaratish (sotuvchining asosiy amali) ────────────────────
-        g.MapPost("", async (NewDealRequest req, IDealService deals, CurrentUser cu, CancellationToken ct) =>
-        {
-            var actor = await cu.GetAsync(ct);
-            var d = await deals.CreateAsync(req, actor, ct);
-            return Results.Ok(new { d.Id, d.Number, d.AmountTotal });
-        });
-
         g.MapPost("/{id:long}/activate", async (long id, IDealService deals, CurrentUser cu, CancellationToken ct) =>
         {
             var d = await deals.ActivateAsync(id, await cu.GetAsync(ct), ct);

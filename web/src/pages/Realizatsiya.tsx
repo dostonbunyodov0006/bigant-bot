@@ -7,7 +7,7 @@ interface DealRow {
   id: number; number: string; counterparty: string; inn: string | null
   amountTotal: number; amountPaid: number; debt: number; vat: number
   status: string; contractDate: string | null; dueDate: string | null
-  positions: number; hasEsf: boolean; hasTtn: boolean
+  hasEsf: boolean; hasTtn: boolean
 }
 
 interface View {
@@ -17,7 +17,6 @@ interface View {
   }
   checks: {
     withoutInn: string[]
-    withoutMxik: { number: string; product: string }[]
     overduePayments: { number: string; counterparty: string; debt: number; lateDays: number }[]
     withoutEsf: string[]
   }
@@ -26,7 +25,7 @@ interface View {
 
 export default function Realizatsiya() {
   const nav = useNavigate()
-  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/realizatsiya'), [])
+  const { data, loading, error } = useAsync<View>(() => api.get('/api/view/realizatsiya'), [], 15000)
 
   if (loading) return <Loading />
   if (error) return <ErrorBox text={error} />
@@ -48,10 +47,6 @@ export default function Realizatsiya() {
       key: 'inn' + n, text: `${n} — kontragentda INN yo'q`,
       sub: 'Didox INN siz faktura qabul qilmaydi',
     })),
-    ...c.withoutMxik.map((m, i) => ({
-      key: 'mxik' + i, text: `${m.number} — MXIK kodi yo'q`,
-      sub: m.product,
-    })),
     ...c.withoutEsf.map(n => ({
       key: 'esf' + n, text: `${n} — schyot-faktura chiqarilmagan`,
       sub: 'Sotuv rasmiylashmagan',
@@ -61,7 +56,7 @@ export default function Realizatsiya() {
   return (
     <>
       <Explain mark="R" title="Realizatsiya buxgalteriyasi"
-        can={['Sotuv bitimlari', 'Faktura va TTN nazorati', 'INN va MXIK tekshiruvi',
+        can={['Sotuv bitimlari', 'Faktura va TTN nazorati', 'INN tekshiruvi',
               'QQS', 'Tushgan pul', 'Debitor qarzdorlik']}>
         Bu ekran bitta savolga javob beradi: <b>nima sotdik, kimga, qancha summaga
         va puli keldimi.</b> Faqat sotuv bitimlari ko'rinadi — xarid boshqa
@@ -105,7 +100,6 @@ export default function Realizatsiya() {
                     <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{dateUz(d.contractDate)}</div>
                   </td>
                   <td>{d.counterparty}
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>{d.positions} pozitsiya</div>
                   </td>
                   <td className="mono" style={{ fontSize: 12, color: d.inn ? 'var(--ink-3)' : 'var(--crit)' }}>
                     {d.inn ?? "yo'q ⚠"}

@@ -198,48 +198,39 @@ public static class DirectoryEndpoints
         {
             var company = await db.CompanyProfiles.AsNoTracking().FirstOrDefaultAsync(ct);
 
-            var products = await db.Products.AsNoTracking().Include(p => p.Group)
-                .Where(p => p.IsActive).ToListAsync(ct);
-            var badProducts = products.Where(p => !p.IsReadyForDidox).ToList();
 
-            var cps = await db.Counterparties.AsNoTracking()
+
+            var counterparties = await db.Counterparties.AsNoTracking()
                 .Where(c => !c.IsBlocked).ToListAsync(ct);
-            var badCps = cps.Where(c => !c.IsReadyForDidox).ToList();
+            var badCp = counterparties
+                .Select(c => new { c.Id, c.Name, Missing = c.MissingForDidox().ToList() })
+                .Where(x => x.Missing.Count > 0)
+                .ToList();
 
-            var emps = await db.Employees.AsNoTracking().Where(e => e.IsActive).ToListAsync(ct);
-            var templates = await db.ContractTemplates.CountAsync(t => t.IsActive, ct);
+            var employees = await db.Employees.AsNoTracking().Where(e => e.IsActive).ToListAsync(ct);
 
             return Results.Ok(new
             {
                 company = new
                 {
                     exists = company is not null,
-                    ready = company?.IsReadyForDidox ?? false,
-                    missing = company?.MissingForDidox().ToArray() ?? ["Rekvizitlar kiritilmagan"]
-                },
-                products = new
-                {
-                    total = products.Count,
-                    notReady = badProducts.Count,
-                    sample = badProducts.Take(10).Select(p => new { p.Id, p.Name, problem = p.DidoxProblem })
+                    ready = company is not null && company.MissingForDidox().Count() == 0,
+                    missing = company?.MissingForDidox().ToList() ?? ["Rekvizitlar kiritilmagan"],
                 },
                 counterparties = new
                 {
-                    total = cps.Count,
-                    notReady = badCps.Count,
-                    sample = badCps.Take(10).Select(c => new
-                    {
-                        c.Id, c.Name, missing = c.MissingForDidox().ToArray()
-                    })
+                    total = counterparties.Count,
+                    notReady = badCp.Count,
+                    sample = badCp.Take(10),
                 },
                 employees = new
                 {
-                    total = emps.Count,
-                    canReceiveGoods = emps.Count(e => e.CanReceiveGoods),
-                    drivers = emps.Count(e => e.CanDrive)
+                    total = employees.Count,
+                    canReceiveGoods = employees.Count(e => e.CanReceiveGoods),
+                    drivers = employees.Count(e => e.IsDriver),
                 },
-                contractTemplates = templates
+                contractTemplates = await db.ContractTemplates.CountAsync(ct),
             });
-        }).RequireAuthorization();
+        });
     }
 }
