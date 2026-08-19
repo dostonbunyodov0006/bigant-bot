@@ -126,7 +126,7 @@ public sealed class InboxService : IInboxService
             UserId = deal.ManagerId,
             DealId = deal.Id,
             DocumentId = doc.Id,
-            Title = $"{label} keldi",
+            Title = $"{DocIcon(inc.DocType)} {label.ToUpperInvariant()} KELDI",
             Body = body,
             DedupKey = $"Incoming:doc:{doc.Id}"
         }, ct);
@@ -138,6 +138,20 @@ public sealed class InboxService : IInboxService
         _log.LogInformation("Kiruvchi hujjat ro'yxatga olindi: {Type} №{Number}", inc.DocType, inc.DocNumber);
         return doc;
     }
+
+    /// <summary>
+    /// Har hujjat turining O'Z belgisi — bugalter xabarlar ro'yxatini
+    /// aylantirganda o'qimasdan, faqat belgiga qarab ajratsin.
+    /// </summary>
+    private static string DocIcon(DocType t) => t switch
+    {
+        DocType.Contract          => "\U0001F4C4",   // varaq — dogovor
+        DocType.InvoiceForPayment => "\U0001F4B5",   // pul — schyot na oplatu
+        DocType.Doverennost       => "\U0001F4DD",   // qalam bilan yozuv — ishonchnoma
+        DocType.Ttn               => "\U0001F69A",   // yuk mashinasi — TTN
+        DocType.Esf               => "\U0001F9FE",   // chek — schyot-faktura
+        _                         => "\U0001F4E5",   // kiruvchi quti
+    };
 
     /// <summary>
     /// Kelgan hujjat qaysi hujjat ASOSIDA chiqarilgan.

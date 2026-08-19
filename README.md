@@ -336,12 +336,13 @@ Veb-interfeys yo'q, lekin endpointlar **test va integratsiya uchun** ishlaydi
    summa faqat bugalter kiritganidan. Bugalter to'lovni yozishni unutsa, qarz
    haqiqiydan katta ko'rinadi. Ishonchliroq yo'l — bank vipiskasi importi.
 2. **Zanjir ikki manbadan quriladi.** Kiruvchi hujjatning xom JSON ida Didox'ning
-   o'z havolasi bo'lsa ( va o'xshashlari) —
-   aynan o'sha doverennostga bog'lanadi. Bo'lmasa — zanjirdagi tartib bo'yicha
-   taxmin qilinadi. Maydon nomlari  da
-    bilan belgilangan, rasmiy hujjatdan tasdiqlash kerak.
-   Noto'g'ri nom hech narsani buzmaydi — shunchaki taxminga qaytadi.
-   Chiquvchi fakturamizda  hali .
+   o'z havolasi bo'lsa (`FacturaEmpowermentDoc.EmpowermentNo` va o'xshashlari) —
+   aynan o'sha doverennostga bog'lanadi, bu ANIQ ma'lumot. Bo'lmasa — zanjirdagi
+   tartib bo'yicha taxmin qilinadi. Maydon nomlari
+   `InboxService.ExtractEmpowermentNumber` da `TODO(didox)` bilan belgilangan —
+   rasmiy hujjatdan tasdiqlang. Noto'g'ri nom hech narsani buzmaydi: kod
+   jimgina taxminga qaytadi. Chiquvchi fakturamizda `FacturaEmpowermentDoc`
+   hali `null` — uni ham rasmiy sxema bilan to'ldirish kerak.
 3. **`DidoxHttpClient` — skelet.** Yuqoridagi 3 ta `TODO(didox)` to'ldirilmaguncha
    Didox bilan real aloqa yo'q.
 

@@ -197,8 +197,17 @@ public sealed class TelegramChannel : INotificationChannel
             _ => "ℹ"
         };
 
+        var title = n.Title.Trim();
         var body = Escape(n.Body);
-        return $"{icon} <b>{Escape(n.Title)}</b>\n\n{body}";
+
+        // Sarlavha o'z belgisi bilan kelgan bo'lsa (har hujjat turining o'ziniki:
+        // 📄 dogovor, 📝 doverennost, 🚚 TTN, 🧾 faktura) — umumiy belgini
+        // qo'shmaymiz, aks holda ikkita belgi yonma-yon turadi.
+        var hasOwnIcon = title.Length > 0 && !char.IsLetterOrDigit(title[0]);
+
+        return hasOwnIcon
+            ? $"<b>{Escape(title)}</b>\n\n{body}"
+            : $"{icon} <b>{Escape(title)}</b>\n\n{body}";
     }
 
     /// <summary>
