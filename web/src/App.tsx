@@ -11,11 +11,8 @@ import Realizatsiya from './pages/Realizatsiya'
 import Perehod from './pages/Perehod'
 import AdminView from './pages/AdminView'
 import Hisobot from './pages/Hisobot'
-import Deals from './pages/Deals'
 import DealCardPage from './pages/DealCard'
-import Inbox from './pages/Inbox'
 import Notifications from './pages/Notifications'
-import Setup from './pages/Setup'
 
 interface NavItem {
   to: string
@@ -39,18 +36,22 @@ const NAV: NavItem[] = [
   { to: '/admin', label: 'Barcha shartnomalar', hint: 'sotuv va xarid — birgalikda',
     ic: '▣', roles: ['Admin'], group: 'Kundalik ish' },
 
+  // Oylik hisobot — rahbar uchun. Buxgalterning kundalik savollariga o'z
+  // sahifasi javob beradi; bu yerda esa umumiy manzara: kontragentlar
+  // kesimi, oylik pul aylanmasi, jami qarz.
   { to: '/hisobot', label: 'Oylik hisobot', hint: 'bir oylik to\'liq manzara',
-    ic: '▤', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Kundalik ish' },
+    ic: '▤', roles: ['Admin'], group: 'Kundalik ish' },
 
-  { to: '/deals', label: 'Shartnomalar', hint: 'har bir shartnoma: summa, to\'lov, qarz',
-    ic: '≡', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Hujjatlar' },
-  { to: '/inbox', label: 'Kelgan hujjatlar', hint: 'Didoxdan tushgan hujjatlar oqimi',
-    ic: '↓', roles: ['Perehod', 'Admin'], group: 'Hujjatlar' },
+  // «Shartnomalar» va «Kelgan hujjatlar» olib tashlandi.
+  //   • Shartnomalar — «Barcha shartnomalar» bilan bir xil edi va uchala
+  //     rolga ochiq bo'lgani uchun rol ajratishni buzardi: realizatsiya
+  //     buxgalteri xarid shartnomalarini ham ko'ra olardi.
+  //   • Kelgan hujjatlar — bog'lanmagan hujjat allaqachon Eslatmalarda va
+  //     Perehod sahifasidagi ish ro'yxatida ko'rinadi.
+  // Shartnoma kartochkasi (/deals/:id) qoladi — istalgan ro'yxatdan ochiladi.
 
   { to: '/notifications', label: 'Eslatmalar', hint: 'botga kelgan xabarlar shu yerda ham',
-    ic: '◔', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Sozlash' },
-  { to: '/setup', label: 'Sozlamalar', hint: 'tizim holati va Bigant INN',
-    ic: '⚙', roles: ['Admin'], group: 'Sozlash' },
+    ic: '◔', roles: ['Realizatsiya', 'Perehod', 'Admin'], group: 'Kundalik ish' },
 ]
 
 /** Rol kirganda birinchi ko'radigan sahifa — o'z ishi. */
@@ -132,12 +133,9 @@ function Shell() {
             <Route path="/realizatsiya" element={<Guard ok={me.role !== 'Perehod'}><Realizatsiya /></Guard>} />
             <Route path="/perehod" element={<Guard ok={me.role !== 'Realizatsiya'}><Perehod /></Guard>} />
             <Route path="/admin" element={<Guard ok={me.role === 'Admin'}><AdminView /></Guard>} />
-            <Route path="/hisobot" element={<Hisobot />} />
-            <Route path="/deals" element={<Deals />} />
+            <Route path="/hisobot" element={<Guard ok={me.role === 'Admin'}><Hisobot /></Guard>} />
             <Route path="/deals/:id" element={<DealCardPage />} />
-            <Route path="/inbox" element={<Guard ok={me.role !== 'Realizatsiya'}><Inbox /></Guard>} />
             <Route path="/notifications" element={<Notifications />} />
-            <Route path="/setup" element={<Guard ok={me.role === 'Admin'}><Setup /></Guard>} />
             <Route path="*" element={<div className="empty">Sahifa topilmadi</div>} />
           </Routes>
           </ErrorGuard>

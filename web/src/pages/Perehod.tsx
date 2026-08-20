@@ -7,12 +7,12 @@ import { fold, Search } from '../components/TableSort'
 import { useState } from 'react'
 
 interface ChainDoc {
-  id: number; type: string; label: string; number: string | null
+  id: number; label: string; number: string | null
   date: string; direction: string; amount: number
   basis: string | null; amountMatchesParent: boolean
 }
 interface Chain {
-  dealId: number; number: string; kind: string; counterparty: string
+  dealId: number; number: string; counterparty: string
   isBroken: boolean; problems: string[]; documents: ChainDoc[]
 }
 interface Waiting {
@@ -134,9 +134,6 @@ function ChainRow({ c, onOpen }: { c: Chain; onOpen: () => void }) {
       <div className="chain-head">
         <button className="btn sm" onClick={onOpen}>{c.number}</button>
         <b style={{ fontSize: 13.5 }}>{c.counterparty}</b>
-        <span className={'pill ' + (c.kind === 'Sale' ? 'acc' : 'neut')}>
-          {c.kind === 'Sale' ? 'Sotuv' : 'Xarid'}
-        </span>
         {!c.isBroken && <span className="pill ok" style={{ marginLeft: 'auto' }}>✓ hujjatlari to'liq</span>}
       </div>
 

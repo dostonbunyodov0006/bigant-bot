@@ -58,7 +58,9 @@ public static class RoleDashboardEndpoints
                     Inn = d.Counterparty.Inn,
                     d.AmountTotal,
                     d.AmountPaid,
-                    Debt = d.AmountTotal - d.AmountPaid,
+                    // Ortiqcha to'langanda qarz manfiy emas, NOL bo'ladi —
+                    // ortiqchasi avans, uni «Qarz» ustunida ko'rsatish xato.
+                    Debt = d.AmountTotal > d.AmountPaid ? d.AmountTotal - d.AmountPaid : 0,
                     // QQS Didox hujjatidan keladi — tovar ro'yxati bizda yo'q.
                     Vat = d.Documents.Where(x => x.DocType == DocType.Esf).Sum(x => x.VatAmount),
                     Status = d.Status.ToString(),
@@ -88,8 +90,6 @@ public static class RoleDashboardEndpoints
 
             return Results.Ok(new
             {
-                role = "Realizatsiya",
-                period = new { from = monthAgo, to = today },
                 summary = new
                 {
                     openDeals = open.Count,
@@ -126,10 +126,13 @@ public static class RoleDashboardEndpoints
 
             var today = UzTime.Today;
 
-            // Barcha ochiq bitimlarning hujjatlari — ikkala yo'nalish ham.
+            // FAQAT XARID. Sotuv hujjatlari realizatsiya buxgalterining ishi —
+            // uning ekranida «Hujjatlari bormi» ustuni va «faktura chiqarilmagan»
+            // ro'yxati bor. Ikkalasida ko'rsatilsa bir ish ikki kishi tekshiradi.
             var docs = await db.Documents.AsNoTracking()
                 .Where(x => x.DealId != null
                          && x.Deal!.Status == DealStatus.Active
+                         && x.Deal.Kind == DealKind.Purchase
                          && x.Status != DocStatus.Cancelled && x.Status != DocStatus.Rejected)
                 .Select(x => new
                 {
@@ -164,14 +167,15 @@ public static class RoleDashboardEndpoints
                 {
                     dealId = g2.Key,
                     number = first.Number,
-                    kind = first.Kind.ToString(),
+                    // «Yo'nalish» yuborilmaydi: bu ekranda hamma zanjir xarid,
+                    // belgisi har qatorda bir xil turib, joy egallardi.
                     counterparty = first.Counterparty,
                     isBroken = breaks.Count > 0,
                     problems = breaks.Select(b => b.Problem).ToList(),
                     documents = mine.Select(x => new
                     {
                         x.Id,
-                        type = x.DocType.ToString(),
+                        // Ekranda odam o'qiydigan nom ko'rsatiladi, kod emas.
                         label = DealWorkflow.DocLabel(x.DocType),
                         number = x.DocNumber,
                         date = x.DocDate,
@@ -192,6 +196,7 @@ public static class RoleDashboardEndpoints
             var waiting = await db.DealSteps.AsNoTracking()
                 .Where(s => s.Status == StepStatus.Pending
                          && s.Deal.Status == DealStatus.Active
+                         && s.Deal.Kind == DealKind.Purchase
                          && s.DueDate != null)
                 .Select(s => new
                 {
@@ -238,7 +243,6 @@ public static class RoleDashboardEndpoints
 
             return Results.Ok(new
             {
-                role = "Perehod",
                 summary = new
                 {
                     activeChains = chains.Count,
@@ -260,15 +264,26 @@ public static class RoleDashboardEndpoints
         g.MapGet("/hisobot", async (int? days, AppDbContext db, CurrentUser cu, CancellationToken ct) =>
         {
             var actor = await cu.GetAsync(ct);
+            if (actor.Role != UserRole.Admin)
+                throw new BusinessException("FORBIDDEN", "Oylik hisobot rahbar uchun");
+
             var window = Math.Clamp(days ?? 30, 1, 365);
 
             var to = UzTime.Today;
             var from = to.AddDays(-window);
             var (fromTs, toTs) = UzTime.DayRangeUtc(from, to);
 
-            // Rol kesimi: realizatsiya faqat sotuvni, perehod ikkalasini ko'radi
-            // (chunki hujjat harakati ikkala yo'nalishda ham bo'ladi).
-            DealKind? only = actor.Role == UserRole.Realizatsiya ? DealKind.Sale : null;
+            // Rol kesimi. Hozir bu yerga faqat rahbar kiradi, shuning uchun
+            // kesim har doim «hammasi» bo'ladi. Kod saqlab qo'yilgan: hisobot
+            // buxgalterlarga qaytadan ochilsa, har biri FAQAT o'z yo'nalishini
+            // ko'radi va hisobotdagi HAMMA raqam — bitim, hujjat, pul, zanjir —
+            // shu kesimga bo'ysunadi.
+            DealKind? only = actor.Role switch
+            {
+                UserRole.Realizatsiya => DealKind.Sale,
+                UserRole.Perehod      => DealKind.Purchase,
+                _                     => null,
+            };
 
             var deals = db.Deals.AsNoTracking()
                 .Where(d => only == null || d.Kind == only);
@@ -280,7 +295,8 @@ public static class RoleDashboardEndpoints
             // ── Hujjat harakati: qaysi turdan nechta kelgan / ketgan ──
             var docs = await db.Documents.AsNoTracking()
                 .Where(x => x.CreatedAt >= fromTs && x.CreatedAt < toTs
-                         && x.Status != DocStatus.Cancelled)
+                         && x.Status != DocStatus.Cancelled
+                         && (only == null || (x.DealId != null && x.Deal!.Kind == only)))
                 .GroupBy(x => new { x.DocType, x.Direction })
                 .Select(gr => new { gr.Key.DocType, gr.Key.Direction, Count = gr.Count() })
                 .ToListAsync(ct);
@@ -294,8 +310,16 @@ public static class RoleDashboardEndpoints
             }).ToList();
 
             // ── Pul harakati ──
+            // Shartnomaga bog'langan to'lov — shartnoma yo'nalishi bo'yicha.
+            // Bog'lanmagani esa yo'nalishi bo'yicha: pul kelgani sotuvniki,
+            // pul ketgani xaridniki.
             var pays = await db.Payments.AsNoTracking()
                 .Where(p2 => p2.PayDate >= from && p2.PayDate <= to)
+                .Where(p2 => only == null
+                          || (p2.DealId != null && p2.Deal!.Kind == only)
+                          || (p2.DealId == null && (only == DealKind.Sale
+                                ? p2.Direction == PaymentDirection.In
+                                : p2.Direction == PaymentDirection.Out)))
                 .GroupBy(p2 => p2.Direction)
                 .Select(gr => new { Dir = gr.Key, Total = gr.Sum(x => x.Amount), Count = gr.Count() })
                 .ToListAsync(ct);
@@ -314,7 +338,7 @@ public static class RoleDashboardEndpoints
                     deals = gr.Count(),
                     total = gr.Sum(x => x.AmountTotal),
                     paid = gr.Sum(x => x.AmountPaid),
-                    debt = gr.Sum(x => x.AmountTotal - x.AmountPaid),
+                    debt = gr.Sum(x => x.AmountTotal > x.AmountPaid ? x.AmountTotal - x.AmountPaid : 0),
                 })
                 .OrderByDescending(x => x.debt)
                 .Take(50)
@@ -323,6 +347,7 @@ public static class RoleDashboardEndpoints
             // ── Zanjir sog'ligi ──
             var chainRows = await db.Documents.AsNoTracking()
                 .Where(x => x.DealId != null && x.Deal!.Status == DealStatus.Active
+                         && (only == null || x.Deal.Kind == only)
                          && x.Status != DocStatus.Cancelled && x.Status != DocStatus.Rejected)
                 .Select(x => new { DealId = x.DealId!.Value, x.Id, x.DocType, x.ParentDocumentId })
                 .ToListAsync(ct);
@@ -347,9 +372,13 @@ public static class RoleDashboardEndpoints
                     paidOutCount = paidOut?.Count ?? 0,
                     receivedTotal = paidIn?.Total ?? 0m,
                     receivedCount = paidIn?.Count ?? 0,
-                    weOwe = await deals.Where(d => d.Kind == DealKind.Purchase && d.Status == DealStatus.Active)
+                    // Ortiqcha to'langan shartnoma qarzni KAMAYTIRMAYDI —
+                    // u avans, boshqa shartnoma qarzini yopmaydi.
+                    weOwe = await deals.Where(d => d.Kind == DealKind.Purchase && d.Status == DealStatus.Active
+                                              && d.AmountTotal > d.AmountPaid)
                                        .SumAsync(d => (decimal?)(d.AmountTotal - d.AmountPaid), ct) ?? 0m,
-                    theyOwe = await deals.Where(d => d.Kind == DealKind.Sale && d.Status == DealStatus.Active)
+                    theyOwe = await deals.Where(d => d.Kind == DealKind.Sale && d.Status == DealStatus.Active
+                                                && d.AmountTotal > d.AmountPaid)
                                          .SumAsync(d => (decimal?)(d.AmountTotal - d.AmountPaid), ct) ?? 0m,
                 },
                 documents = docRows,
@@ -379,7 +408,7 @@ public static class RoleDashboardEndpoints
                     count = g2.Count(),
                     total = g2.Sum(x => x.AmountTotal),
                     paid = g2.Sum(x => x.AmountPaid),
-                    debt = g2.Sum(x => x.AmountTotal - x.AmountPaid),
+                    debt = g2.Sum(x => x.AmountTotal > x.AmountPaid ? x.AmountTotal - x.AmountPaid : 0),
                 })
                 .ToListAsync(ct);
 
@@ -388,19 +417,26 @@ public static class RoleDashboardEndpoints
                 .Select(u => new { u.Id, u.Username, u.FullName, Role = u.Role.ToString() })
                 .ToListAsync(ct);
 
+            // SHARTNOMA SANASI bo'yicha, yaratilgan vaqt bo'yicha EMAS.
+            // Yaratilgan vaqt — bazaga qachon yozilgani, ya'ni import vaqti.
+            // Xaridlar bir kunda ommaviy yuklangani uchun ular hamma vaqt
+            // tepada turib, sotuvni pastga surib yuborardi. Buxgalter uchun
+            // «oxirgi shartnoma» degani — sanasi eng yangisi.
             var recent = await deals
-                .OrderByDescending(d => d.CreatedAt)
-                .Take(30)
+                .OrderByDescending(d => d.ContractDate ?? DateOnly.FromDateTime(d.CreatedAt.Date))
+                .ThenByDescending(d => d.Id)
+                // Qidiruv va saralash butun ro'yxat bo'yicha ishlashi kerak:
+                // 30 ta qator bilan kerakli shartnomani topib bo'lmasdi.
+                .Take(300)
                 .Select(d => new
                 {
                     d.Id, d.Number, kind = d.Kind.ToString(),
                     counterparty = d.Counterparty.Name,
                     d.AmountTotal, d.AmountPaid,
-                    debt = d.AmountTotal - d.AmountPaid,
+                    debt = d.AmountTotal > d.AmountPaid ? d.AmountTotal - d.AmountPaid : 0,
                     status = d.Status.ToString(),
                     d.CreatedAt,
-                    stepsDone = d.Steps.Count(s => s.Status == StepStatus.Done),
-                    stepsTotal = d.Steps.Count,
+
                 })
                 .ToListAsync(ct);
 

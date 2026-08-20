@@ -88,69 +88,6 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = [], refreshM
 export const Pill = ({ kind, children }: { kind: 'ok' | 'warn' | 'crit' | 'neut' | 'acc'; children: ReactNode }) =>
   <span className={`pill ${kind}`}>{children}</span>
 
-export function Seg<T extends string>({ value, onChange, options }: {
-  value: T
-  onChange: (v: T) => void
-  options: { v: T; label: string }[]
-}) {
-  return (
-    <div className="seg">
-      {options.map(o => (
-        <button key={o.v} type="button" aria-pressed={value === o.v} onClick={() => onChange(o.v)}>
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-export function Field({ label, required, hint, full, children }: {
-  label: string; required?: boolean; hint?: string; full?: boolean; children: ReactNode
-}) {
-  return (
-    <label className={'fld' + (full ? ' full' : '')}>
-      <span className="lb">{label}{required && <span className="req"> *</span>}</span>
-      {children}
-      {hint && <span style={{ fontSize: 11, color: 'var(--ink-3)', display: 'block', marginTop: 3 }}>{hint}</span>}
-    </label>
-  )
-}
-
-export function Modal({ title, onClose, onOk, okLabel = 'Saqlash', busy, children }: {
-  title: string
-  onClose: () => void
-  onOk?: () => void
-  okLabel?: string
-  busy?: boolean
-  children: ReactNode
-}) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose])
-
-  return (
-    <div className="modal-bg" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-h">
-          <h2>{title}</h2>
-          <button className="btn sm" onClick={onClose} aria-label="Yopish">✕</button>
-        </div>
-        <div className="modal-b">{children}</div>
-        {onOk && (
-          <div className="modal-f">
-            <button className="btn" onClick={onClose}>Bekor</button>
-            <button className="btn pri" onClick={onOk} disabled={busy}>
-              {busy ? 'Kutilmoqda…' : okLabel}
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 export const Loading = () => <div className="empty">Yuklanmoqda…</div>
 export const ErrorBox = ({ text }: { text: string }) =>
   <div className="alert crit" style={{ margin: 16 }}><div>{text}</div></div>

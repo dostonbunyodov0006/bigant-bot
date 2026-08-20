@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, dateUz, money, type DealCard } from '../lib/api'
 import { ErrorBox, Loading, errText, useAsync, useToast } from '../lib/ui'
+import { useAuth } from '../lib/auth'
 
 /** Hujjatni kim chiqaradi — backenddagi qoidaning aynan nusxasi. */
 function issuer(kind: string, step: string, contractByUs = true): 'us' | 'them' {
@@ -16,6 +17,11 @@ export default function DealCardPage() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
+  const { me } = useAuth()
+
+  // Muddat o'tganini shu bilan solishtiramiz (YYYY-MM-DD matn taqqoslash
+  // sana taqqoslash bilan bir xil natija beradi).
+  const bugun = new Date().toISOString().slice(0, 10)
   const [busy, setBusy] = useState(false)
 
   const { data: d, error, loading, reload } = useAsync(
@@ -25,8 +31,22 @@ export default function DealCardPage() {
   if (error) return <ErrorBox text={error} />
   if (!d) return null
 
+// Izoh maydonida ikki xil narsa turadi: tizimning o'z izi
+  // («Kiruvchi hujjatdan avtomatik ochildi») va odam yozgani —
+  // masalan bekor qilish sababi. Birinchisi ekranga chiqmaydi,
+  // ikkinchisi esa hech qayerda ko'rinmasdi.
+  const izoh = (d.comment ?? '')
+    .split(String.fromCharCode(10))
+    .filter(q => q.trim() && !q.startsWith('Kiruvchi hujjatdan avtomatik ochildi'))
+    .join(String.fromCharCode(10))
+    .trim()
+
   const nextStep = d.steps.find(s => s.status === 'Pending')
-  const editable = d.status === 'Active' || d.status === 'Draft'
+  // Shartnomani bekor qilish — faqat rahbar. Buxgalterning ekrani
+  // ko'rish uchun: hujjat harakati Didoxda bo'ladi. Ilgari bu tugma
+  // ikkala buxgalterga ham ko'rinardi va ular xarid shartnomasini
+  // bekor qila olardi.
+  const editable = me?.role === 'Admin' && (d.status === 'Active' || d.status === 'Draft')
 
   const act = async (fn: () => Promise<unknown>, ok: string) => {
     setBusy(true)
@@ -38,7 +58,10 @@ export default function DealCardPage() {
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-        <button className="btn sm" onClick={() => nav('/deals')}>← Ortga</button>
+        {/* «Shartnomalar» sahifasi olib tashlangan — orqaga qaytish
+            brauzer tarixi bo'yicha ishlaydi, aks holda «Sahifa topilmadi»
+            chiqardi. */}
+        <button className="btn sm" onClick={() => nav(-1)}>← Ortga</button>
         <div>
           <h2 className="mono" style={{ fontSize: 18 }}>{d.number}</h2>
           <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
@@ -100,14 +123,31 @@ export default function DealCardPage() {
               <dt>MChJ nomi</dt><dd>{d.counterparty.name}</dd>
               <dt>INN</dt><dd className="mono">{d.counterparty.inn ?? '—'}</dd>
               <dt>Shartnoma summasi</dt><dd className="num">{money(d.amountTotal)}</dd>
-              <dt>To'langan summa</dt>
-              <dd className="num" style={{ color: d.amountPaid >= d.amountTotal ? 'var(--ok)' : 'var(--warn)' }}>
-                {money(d.amountPaid)}</dd>
-              <dt>Qolgan qarz</dt>
-              <dd className="num" style={{ color: d.amountTotal - d.amountPaid > 0 ? 'var(--bad)' : 'var(--ok)' }}>
-                {money(d.amountTotal - d.amountPaid)}</dd>
-              <dt>Ochilganiga</dt><dd>{d.ageDays} kun</dd>
+              {/* «To'langan summa» va «Qolgan qarz» bu yerdan olib tashlandi:
+                  o'sha uch raqam pastdagi «To'lovlar» kartochkasida chizig'i
+                  bilan birga turardi. Bitta ekranda ikki marta ko'rsatish
+                  o'qiyotgan odamni chalg'itadi — qaysi biri to'g'ri deb
+                  o'ylashga majbur qiladi. */}
               <dt>Shartnoma sanasi</dt><dd>{dateUz(d.contractDate)}</dd>
+              {/* To'lov muddati serverdan kelardi, lekin hech qayerda
+                  ko'rsatilmasdi — kartochkaning eng kerakli sanasi. */}
+              <dt>To'lov muddati</dt>
+              <dd style={{
+                color: d.dueDate && d.amountTotal > d.amountPaid && d.dueDate < bugun
+                  ? 'var(--crit)' : undefined,
+                fontWeight: d.dueDate && d.amountTotal > d.amountPaid && d.dueDate < bugun ? 600 : 400,
+              }}>
+                {d.dueDate
+                  ? dateUz(d.dueDate) +
+                    (d.amountTotal > d.amountPaid && d.dueDate < bugun ? " — muddati o'tgan" : '')
+                  : "ko'rsatilmagan"}
+              </dd>
+              <dt>Ochilganiga</dt><dd>{d.ageDays} kun</dd>
+              <dt>Mas'ul xodim</dt><dd>{d.manager ?? '—'}</dd>
+              {izoh && <>
+                <dt>Izoh</dt>
+                <dd style={{ whiteSpace: 'pre-line', color: 'var(--crit)' }}>{izoh}</dd>
+              </>}
             </dl>
           </div>
         </div>
@@ -141,6 +181,14 @@ export default function DealCardPage() {
                               ? <>asos: <b>{x.basis}</b></>
                               : <span style={{ fontStyle: 'italic' }}>birinchi hujjat</span>}
                           </div>
+                          {/* Hujjat rad etilgan bo'lsa SABABI ko'rinsin.
+                              Sabab serverdan kelardi, lekin ekranda hech
+                              qayerda chiqmasdi — buxgalter nega rad
+                              etilganini bilmasdi. */}
+                          {x.rejectReason &&
+                            <div style={{ fontSize: 12, color: 'var(--crit)', marginTop: 3 }}>
+                              rad etish sababi: <b>{x.rejectReason}</b>
+                            </div>}
                         </div>
                       </li>
                     )

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, money, dateTimeUz } from '../lib/api'
-import { ErrorBox, Loading, useAsync } from '../lib/ui'
+import { ErrorBox, Loading, errText, useAsync, useToast } from '../lib/ui'
 import { useLive } from '../lib/live'
 import { Kpi } from '../components/RoleUi'
 import { fold, Search, StatusFilter, useSort } from '../components/TableSort'
@@ -65,12 +65,16 @@ export default function AdminView() {
       <div className="kpis">
         <Kpi label="Davom etayotgan sotuv" value={sale?.count ?? 0}
           note={money(sale?.total ?? 0) + " so'm"} />
+        {/* Qancha to'langani serverdan kelardi, lekin ekranda hech qayerda
+            ko'rinmasdi — qarzning yonida turgani eng foydali joyi. */}
         <Kpi label="Klientlar bizga qarzdor" value={money(sale?.debt ?? 0)}
-          tone={(sale?.debt ?? 0) > 0 ? 'warn' : 'ok'} note="klientlardan olinishi kerak" />
+          tone={(sale?.debt ?? 0) > 0 ? 'warn' : 'ok'}
+          note={money(sale?.paid ?? 0) + " so'm allaqachon tushgan"} />
         <Kpi label="Davom etayotgan xarid" value={buy?.count ?? 0}
           note={money(buy?.total ?? 0) + " so'm"} />
         <Kpi label="Biz postavshiklarga qarzdormiz" value={money(buy?.debt ?? 0)}
-          tone={(buy?.debt ?? 0) > 0 ? 'crit' : 'ok'} note="postavshiklarga to'lanishi kerak" />
+          tone={(buy?.debt ?? 0) > 0 ? 'warn' : 'ok'}
+          note={money(buy?.paid ?? 0) + " so'm allaqachon to'langan"} />
         <Kpi label="Tugagan shartnomalar" value={data.counts.closedDeals} tone="ok"
           note="hujjatlari to'liq yig'ilgan" />
       </div>
@@ -101,24 +105,25 @@ export default function AdminView() {
                   <th {...th('amountTotal')} className={th('amountTotal').className + ' r'}>Shartnoma summasi{mark('amountTotal')}</th>
                   <th {...th('amountPaid')} className={th('amountPaid').className + ' r'}>To'langan summa{mark('amountPaid')}</th>
                   <th {...th('debt')} className={th('debt').className + ' r'}>Qolgan qarz{mark('debt')}</th>
-                  <th>Bajarilgan bosqich</th>
                   <th {...th('status')}>Shartnoma holati{mark('status')}</th>
                 </tr>
               </thead>
               <tbody>
                 {recent.length === 0 && (
-                  <tr><td colSpan={8} className="empty">
+                  <tr><td colSpan={7} className="empty">
                     {q ? `«${q}» topilmadi` : 'Shartnoma yo\'q'}
                   </td></tr>
                 )}
                 {recent.map(d => {
-                  const pct = d.stepsTotal ? (d.stepsDone / d.stepsTotal) * 100 : 0
                   return (
                     <tr key={d.id} className="click" tabIndex={0}
                       onClick={() => nav(`/deals/${d.id}`)}
                       onKeyDown={e => { if (e.key === 'Enter') nav(`/deals/${d.id}`) }}>
                       <td className="mono" style={{ fontWeight: 500 }}>{d.number}</td>
-                      <td><span className={'pill ' + (d.kind === 'Sale' ? 'acc' : 'buy')}>
+                      <td><span className={'pill ' + (d.kind === 'Sale' ? 'acc' : 'buy')}
+                        title={d.kind === 'Sale'
+                          ? 'Biz sotamiz — dogovorni biz chiqaramiz'
+                          : 'Biz sotib olamiz — dogovor ulardan keladi'}>
                         {d.kind === 'Sale' ? '→ Sotuv' : '← Xarid'}</span></td>
                       <td>{d.counterparty}</td>
                       <td className="r num">{money(d.amountTotal)}</td>
@@ -129,16 +134,6 @@ export default function AdminView() {
                         fontWeight: d.debt > 0 ? 600 : 400,
                       }}>
                         {money(d.debt)}</td>
-                      <td style={{ minWidth: 110 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <div className="bar-track" style={{ width: 54 }}>
-                            <div className={'bar-fill' + (pct === 100 ? ' ok' : '')}
-                              style={{ width: `${pct}%` }} />
-                          </div>
-                          <span className="num" style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
-                            {d.stepsDone}/{d.stepsTotal}</span>
-                        </div>
-                      </td>
                       <td>
                         <span className={'pill ' + (d.status === 'Closed' ? 'ok'
                           : d.status === 'Cancelled' ? 'neut' : 'warn')}>
@@ -178,20 +173,82 @@ export default function AdminView() {
           <div className="card">
             <div className="card-h"><h2>Tizim foydalanuvchilari</h2></div>
             <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 11 }}>
-              {data.users.map(u => (
-                <div key={u.id} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <div className="avatar">{u.fullName.split(' ').map(x => x[0]).slice(0, 2).join('')}</div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{u.fullName}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
-                      {ROLE_UZ[u.role] ?? u.role} · <span className="mono">{u.username}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+              {data.users.map(u => <UserRow key={u.id} u={u} />)}
             </div>
           </div>
       </div>
     </>
+  )
+}
+
+/**
+ * Bitta xodim qatori. Rahbar shu yerdan har kimga — o'ziga ham —
+ * yangi parol qo'yadi. Parolini unutgan odam kirish ekranidagi
+ * «Parolni unutdim» tugmasidan ham tiklay oladi.
+ */
+function UserRow({ u }: { u: View['users'][number] }) {
+  const toast = useToast()
+
+  const [ochiq, setOchiq] = useState(false)
+  const [next, setNext] = useState('')
+  const [again, setAgain] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const tayyor = next.length >= 8 && next === again && !busy
+
+  const saqla = async () => {
+    setBusy(true)
+    try {
+      const r = await api.post<{ message: string }>(`/api/auth/users/${u.id}/password`, { next })
+      toast(r.message)
+      setOchiq(false); setNext(''); setAgain('')
+    } catch (e) { toast(errText(e), true) } finally { setBusy(false) }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div className="avatar">{u.fullName.split(' ').map(x => x[0]).slice(0, 2).join('')}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>{u.fullName}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>
+            {ROLE_UZ[u.role] ?? u.role} · <span className="mono">{u.username}</span>
+          </div>
+        </div>
+        <button className="btn sm" style={{ marginLeft: 'auto' }}
+          onClick={() => setOchiq(v => !v)}>
+          {ochiq ? 'Bekor qilish' : 'Parol tiklash'}
+        </button>
+      </div>
+
+      {ochiq && (
+        <div style={{
+          marginTop: 10, marginLeft: 42, padding: 12,
+          background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 6,
+        }}>
+          <div className="hint" style={{ marginBottom: 10 }}>
+            Yangi parolni o'zingiz o'ylab topasiz va {u.fullName.split(' ')[0]}ga aytasiz.
+            Kamida 8 belgi, ichida harf ham raqam ham bo'lsin.
+          </div>
+          <label className="fld" style={{ marginBottom: 8 }}>
+            <span className="lb">Yangi parol</span>
+            <input className="inp" type="text" value={next} autoComplete="off"
+              onChange={e => setNext(e.target.value)} />
+          </label>
+          <label className="fld" style={{ marginBottom: 10 }}>
+            <span className="lb">Takrorlang</span>
+            <input className="inp" type="text" value={again} autoComplete="off"
+              onChange={e => setAgain(e.target.value)} />
+            {again.length > 0 && next !== again &&
+              <span className="hint" style={{ fontSize: 11.5, color: 'var(--crit)' }}>
+                Ikki parol bir xil emas
+              </span>}
+          </label>
+          <button className="btn pri sm" disabled={!tayyor} onClick={saqla}>
+            {busy ? 'Saqlanmoqda…' : "Yangi parolni qo'yish"}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }

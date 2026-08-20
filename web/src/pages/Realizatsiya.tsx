@@ -60,6 +60,10 @@ export default function Realizatsiya() {
 
   const { summary: s, checks: c } = data
 
+  // Muddati o'tganini shu bilan solishtiramiz (YYYY-MM-DD ko'rinishida
+  // matn taqqoslash sana taqqoslash bilan bir xil natija beradi).
+  const bugun = new Date().toISOString().slice(0, 10)
+
   // «Sizning ishingiz» — hamma tekshiruv bitta ro'yxatga yig'iladi,
   // eng shoshilinchi yuqorida.
   const work = [
@@ -88,12 +92,21 @@ export default function Realizatsiya() {
     <>
 
       <div className="kpis">
-        <Kpi label="Jami sotuv summasi" value={money(s.soldTotal)} note={`${s.openDeals} davom etayotgan shartnoma`} />
-        <Kpi label="Bizga tushgan pul" value={money(s.receivedTotal)} tone="ok" note="30 kun ichida" />
+        {/* Yozuvlar raqamning ASL mazmunini aytadi. Ilgari «Jami sotuv
+            summasi» tagida «68 davom etayotgan shartnoma» derdi, lekin
+            raqam 77 ta shartnomani (tugaganlarini ham) qamrab olardi.
+            «Bizga tushgan pul» tagida «30 kun ichida» derdi, aslida esa
+            shu shartnomalar bo'yicha TO'LIQ tushgan pul edi. */}
+        <Kpi label="Jami sotuv summasi" value={money(s.soldTotal)}
+          note={`${s.openDeals} davom etayotgan + ${s.closedDeals} tugagan shartnoma`} />
+        <Kpi label="Bizga tushgan pul" value={money(s.receivedTotal)} tone="ok"
+          note="shu shartnomalar bo'yicha jami" />
         <Kpi label="Klientlar bizga qarzdor" value={money(s.receivable)}
           tone={s.receivable > 0 ? 'warn' : 'ok'} note="hali olinmagan pul" />
-        <Kpi label="Sotuvdan QQS" value={money(s.vatTotal)} note="sotuv bo'yicha hisoblangan QQS" />
-        <Kpi label="Tugagan shartnomalar" value={s.closedDeals} tone="ok" note="hujjatlari to'liq yig'ilgan" />
+        <Kpi label="Sotuvdan QQS" value={money(s.vatTotal)}
+          note="chiqarilgan fakturalar bo'yicha" />
+        <Kpi label="Tugagan shartnomalar" value={s.closedDeals} tone="ok"
+          note="oxirgi 30 kunda yopilgan" />
       </div>
 
       <Work title="Tekshirilishi kerak bo'lgan shartnomalar" empty="Hamma sotuv hujjati joyida"
@@ -120,12 +133,13 @@ export default function Realizatsiya() {
                 <th {...th('amountTotal')} className={th('amountTotal').className + ' r'}>Shartnoma summasi{mark('amountTotal')}</th>
                 <th {...th('amountPaid')} className={th('amountPaid').className + ' r'}>Bizga tushgan{mark('amountPaid')}</th>
                 <th {...th('debt')} className={th('debt').className + ' r'}>Qolgan qarz{mark('debt')}</th>
+                <th {...th('dueDate')}>To'lov muddati{mark('dueDate')}</th>
                 <th>Hujjatlari bormi</th>
                 <th {...th('status')}>Shartnoma holati{mark('status')}</th>
               </tr>
             </thead>
             <tbody>
-              {deals.length === 0 && <tr><td colSpan={8} className="empty">
+              {deals.length === 0 && <tr><td colSpan={9} className="empty">
                 {q ? `«${q}» topilmadi`
                   : filter === 'closed' ? 'Tugagan shartnoma yo\'q' : 'Davom etayotgan sotuv shartnomasi yo\'q'}
               </td></tr>}
@@ -147,6 +161,20 @@ export default function Realizatsiya() {
                     color: d.debt > 0 ? 'var(--crit)' : 'var(--ok)',
                     fontWeight: d.debt > 0 ? 600 : 400,
                   }}>{money(d.debt)}</td>
+                  {/* To'lov muddati serverdan kelardi, lekin ekranda ustuni
+                      yo'q edi — buxgalter qaysi pul kechikkanini jadvaldan
+                      ko'ra olmasdi. Qarzi bor va muddati o'tgan bo'lsa qizil. */}
+                  <td style={{ fontSize: 12 }}>
+                    {d.dueDate
+                      ? <span style={{
+                          color: d.debt > 0 && d.dueDate < bugun ? 'var(--crit)' : 'var(--ink-2)',
+                          fontWeight: d.debt > 0 && d.dueDate < bugun ? 600 : 400,
+                        }}>
+                          {dateUz(d.dueDate)}
+                          {d.debt > 0 && d.dueDate < bugun && " — o'tgan"}
+                        </span>
+                      : <span style={{ color: 'var(--ink-3)' }}>ko'rsatilmagan</span>}
+                  </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <span className={'pill ' + (d.hasTtn ? 'ok' : 'off')} title="TTN">TTN</span>

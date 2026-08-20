@@ -1,4 +1,5 @@
 using Bigant.Api.Auth;
+using Bigant.Domain.Entities;
 using Bigant.Domain.Enums;
 using Bigant.Domain.Workflow;
 using Bigant.Infrastructure;
@@ -13,6 +14,39 @@ public static class DealEndpoints
     public sealed record CancelRequest(string Reason);
     public sealed record CompleteRequest(long? DocumentId, string? Note);
 
+    /// <summary>
+    /// Har rol faqat o'z yo'nalishini ko'radi: realizatsiya — sotuv,
+    /// perehod — xarid. Rahbar ikkalasini ham.
+    ///
+    /// Bu tekshiruv menyuda emas, SERVERDA turishi shart: menyudan
+    /// bo'lim olib tashlansa ham, manzilni qo'lda yozgan odam ochib
+    /// ko'ra olardi.
+    /// </summary>
+    private static DealKind? OnlyKind(UserRole role) => role switch
+    {
+        UserRole.Realizatsiya => DealKind.Sale,
+        UserRole.Perehod      => DealKind.Purchase,
+        _                     => null,
+    };
+
+    private static void EnsureVisible(Deal d, AppUser actor)
+    {
+        if (OnlyKind(actor.Role) is { } only && d.Kind != only)
+            throw new BusinessException("FORBIDDEN",
+                only == DealKind.Sale
+                    ? "Bu xarid shartnomasi — perehod buxgalterining ishi"
+                    : "Bu sotuv shartnomasi — realizatsiya buxgalterining ishi");
+    }
+
+    /// <summary>Shartnomani o'zgartirish — faqat rahbar. Buxgalterlarning
+    /// ekrani faqat ko'rish uchun: hamma harakat Didoxda bo'ladi.</summary>
+    private static void EnsureBoss(AppUser actor)
+    {
+        if (actor.Role != UserRole.Admin)
+            throw new BusinessException("FORBIDDEN",
+                "Shartnomani o'zgartirish rahbarning huquqi. Hujjat harakati Didoxda bo'ladi.");
+    }
+
     public static void MapDealEndpoints(this WebApplication app)
     {
         var g = app.MapGroup("/api/deals").WithTags("Shartnomalar").RequireAuthorization().RequireRateLimiting("api");
@@ -23,6 +57,9 @@ public static class DealEndpoints
         {
             var actor = await cu.GetAsync(ct);
             var q = db.Deals.AsNoTracking();
+
+            // Rol kesimi — so'rov parametridan qat'i nazar.
+            if (OnlyKind(actor.Role) is { } only) q = q.Where(d => d.Kind == only);
 
             if (mine == true) q = q.Where(d => d.ManagerId == actor.Id);
 
@@ -51,6 +88,7 @@ public static class DealEndpoints
             var actor = await cu.GetAsync(ct);
             var d = await deals.GetAsync(id, ct)
                     ?? throw new BusinessException("NOT_FOUND", "Shartnoma topilmadi");
+            EnsureVisible(d, actor);
 
             return Results.Ok(new
             {
@@ -72,7 +110,7 @@ public static class DealEndpoints
 
                 documents = d.Documents.Select(x => new
                 {
-                    x.Id, type = x.DocType.ToString(), label = DealWorkflow.DocLabel(x.DocType),
+                    x.Id, label = DealWorkflow.DocLabel(x.DocType),
                     direction = x.Direction.ToString(), status = x.Status.ToString(),
                     x.DocNumber, x.DocDate, x.Amount, x.DidoxId, x.SentAt, x.RejectReason,
                     x.ParentDocumentId,
@@ -87,7 +125,9 @@ public static class DealEndpoints
         // ── Yaratish (sotuvchining asosiy amali) ────────────────────
         g.MapPost("/{id:long}/activate", async (long id, IDealService deals, CurrentUser cu, CancellationToken ct) =>
         {
-            var d = await deals.ActivateAsync(id, await cu.GetAsync(ct), ct);
+            var actor = await cu.GetAsync(ct);
+            EnsureBoss(actor);
+            var d = await deals.ActivateAsync(id, actor, ct);
             return Results.Ok(new { d.Id, Status = d.Status.ToString() });
         });
 
@@ -96,8 +136,9 @@ public static class DealEndpoints
             async (long id, StepType step, CompleteRequest? body, IDealService deals,
                    CurrentUser cu, CancellationToken ct) =>
         {
-            var d = await deals.CompleteStepAsync(id, step, await cu.GetAsync(ct),
-                body?.DocumentId, body?.Note, ct);
+            var actor = await cu.GetAsync(ct);
+            EnsureBoss(actor);
+            var d = await deals.CompleteStepAsync(id, step, actor, body?.DocumentId, body?.Note, ct);
             return Results.Ok(new { d.Id, Status = d.Status.ToString(), d.AllRequiredStepsDone });
         });
 
@@ -105,14 +146,18 @@ public static class DealEndpoints
             async (long id, StepType step, SkipRequest body, IDealService deals,
                    CurrentUser cu, CancellationToken ct) =>
         {
-            var d = await deals.SkipStepAsync(id, step, await cu.GetAsync(ct), body.Reason, ct);
+            var actor = await cu.GetAsync(ct);
+            EnsureBoss(actor);
+            var d = await deals.SkipStepAsync(id, step, actor, body.Reason, ct);
             return Results.Ok(new { d.Id, Status = d.Status.ToString() });
         });
 
         g.MapPost("/{id:long}/cancel",
             async (long id, CancelRequest body, IDealService deals, CurrentUser cu, CancellationToken ct) =>
         {
-            var d = await deals.CancelAsync(id, await cu.GetAsync(ct), body.Reason, ct);
+            var actor = await cu.GetAsync(ct);
+            EnsureBoss(actor);
+            var d = await deals.CancelAsync(id, actor, body.Reason, ct);
             return Results.Ok(new { d.Id, Status = d.Status.ToString() });
         });
     }

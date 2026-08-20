@@ -10,7 +10,7 @@ public static class PaymentEndpoints
 {
     public static void MapPaymentEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/payments").WithTags("To'lovlar").RequireAuthorization().RequireRateLimiting("api");
+        var g = app.MapGroup("/api/payments").WithTags("To'lovlar").RequireAuthorization().RequireRateLimiting("api").RahbarUchun();
 
         g.MapGet("", async (long? counterpartyId, long? dealId, DateOnly? from, DateOnly? to,
                             AppDbContext db, CancellationToken ct) =>

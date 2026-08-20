@@ -35,7 +35,7 @@ public static class InboxEndpoints
 
     public static void MapInboxEndpoints(this WebApplication app)
     {
-        var g = app.MapGroup("/api/inbox").WithTags("Kiruvchi hujjatlar").RequireAuthorization().RequireRateLimiting("api");
+        var g = app.MapGroup("/api/inbox").WithTags("Kiruvchi hujjatlar").RequireAuthorization().RequireRateLimiting("api").RahbarUchun();
 
         g.MapGet("", async (AppDbContext db, IDidoxClient didox, CancellationToken ct) =>
         {

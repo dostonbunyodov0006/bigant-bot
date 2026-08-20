@@ -276,7 +276,10 @@ public sealed class ReminderJob
             raised += await Raise(new Notification
             {
                 Kind = NotificationKind.CounterpartyIncomplete,
-                TargetRole = UserRole.Realizatsiya,
+                // Postavshikning ma'lumoti — perehodning ishi (hujjat
+                // shundan keladi), klientniki — realizatsiyaning.
+                // Ikkalasi ham bo'lsa sotuv tomoni ustun.
+                TargetRole = c.IsClient ? UserRole.Realizatsiya : UserRole.Perehod,
                 Severity = NotificationSeverity.Warning,
                 Title = "\U0001F4CB KONTRAGENTNI ANIQLAB BO'LMAYDI",
                 Body = $"Kontragent: {c.Name}\n\n" +
@@ -328,9 +331,10 @@ public sealed class ReminderJob
     {
         var raised = 0;
         var rows = await _db.Payments.AsNoTracking()
-            .GroupBy(p => new { p.CounterpartyId, p.PayDate, p.Amount })
+            .GroupBy(p => new { p.CounterpartyId, p.PayDate, p.Amount, p.Direction })
             .Where(g => g.Count() > 1)
-            .Select(g => new { g.Key.CounterpartyId, g.Key.PayDate, g.Key.Amount, Count = g.Count() })
+            .Select(g => new { g.Key.CounterpartyId, g.Key.PayDate, g.Key.Amount,
+                               g.Key.Direction, Count = g.Count() })
             .Take(30)
             .ToListAsync(ct);
 
@@ -342,7 +346,10 @@ public sealed class ReminderJob
             raised += await Raise(new Notification
             {
                 Kind = NotificationKind.DuplicatePaymentSameDay,
-                TargetRole = UserRole.Realizatsiya,
+                // Pul bizga kelgan bo'lsa — sotuv tomoni tekshiradi,
+                // biz to'lagan bo'lsak — xarid tomoni.
+                TargetRole = r.Direction == PaymentDirection.In
+                    ? UserRole.Realizatsiya : UserRole.Perehod,
                 Severity = NotificationSeverity.Warning,
                 Title = "🔁 BIR KUNDA BIR XIL TO'LOV",
                 Body = $"Kontragent: {who}\n\n" +
@@ -884,7 +891,9 @@ public sealed class ReminderJob
             raised += await Raise(new Notification
             {
                 Kind = NotificationKind.BigDebtOnOne,
-                TargetRole = UserRole.Realizatsiya,
+                // Biz qarzdormiz (xarid) — perehod tekshiradi;
+                // bizga qarzdor (sotuv) — realizatsiya undiradi.
+                TargetRole = we ? UserRole.Perehod : UserRole.Realizatsiya,
                 Severity = NotificationSeverity.Warning,
                 Title = we ? "🔴 BITTA YERGA KATTA QARZIMIZ" : "🟢 BITTA JOYDA KATTA QARZDORLIK",
                 Body = $"Kontragent: {r.Who}\n\n" +

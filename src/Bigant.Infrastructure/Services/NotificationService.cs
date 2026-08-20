@@ -44,6 +44,30 @@ public sealed class NotificationService : INotificationService
         if (string.IsNullOrWhiteSpace(n.DedupKey))
             throw new BusinessException("NO_DEDUP_KEY", "Eslatmada DedupKey bo'lishi shart");
 
+        // ── KIMGA TEGISHLI: SHARTNOMA YO'NALISHI HAL QILADI ──
+        //
+        // Ilgari rol xabarning TURIga qarab qo'yilardi: masalan «pul keldi,
+        // tovar berilmadi» har doim realizatsiyaga ketardi. Lekin bu xabar
+        // XARID shartnomasida chiqsa, ma'nosi boshqacha — biz to'ladik,
+        // tovar kelmadi — va bu perehodning ishi.
+        //
+        // Natijada realizatsiya buxgalteri xarid haqidagi xabarlarni,
+        // perehod esa sotuv haqidagilarni olardi. Ekranlarni rolga bo'lib
+        // qo'yib, xabarlarni bo'lmaslik — yarim ish.
+        //
+        // Shartnomaga bog'liq bo'lmagan xabarlar (tizim, umumiy xulosa)
+        // o'z rolida qoladi.
+        if (n.DealId is { } dealId)
+        {
+            var kind = await _db.Deals.AsNoTracking()
+                .Where(d => d.Id == dealId)
+                .Select(d => (DealKind?)d.Kind)
+                .FirstOrDefaultAsync(ct);
+
+            if (kind is { } k)
+                n.TargetRole = k == DealKind.Sale ? UserRole.Realizatsiya : UserRole.Perehod;
+        }
+
         // Dedup indeksga tayanamiz — poyga holatida ham ikkinchisi tushmaydi.
         if (await _db.Notifications.AnyAsync(x => x.DedupKey == n.DedupKey, ct))
             return false;

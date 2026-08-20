@@ -221,7 +221,10 @@ export default function Notifications() {
               data-id={n.id}
               ref={n.isRead ? undefined : watch}
               style={{
-                display: 'flex', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--line)',
+                // Har eslatma to'q chiziq bilan ajratiladi — ro'yxatda
+                // ular bir-biriga qo'shilib ketmasin.
+                display: 'flex', gap: 12, padding: '13px 16px',
+                borderBottom: '2px solid var(--grid)',
                 alignItems: 'flex-start', cursor: 'pointer',
                 background: isRead ? undefined : 'var(--surface-3)',
                 transition: 'background .35s ease',

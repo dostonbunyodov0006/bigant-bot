@@ -13,6 +13,7 @@ using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -79,8 +80,16 @@ builder.Services.AddScoped<IFileStorage, LocalFileStorage>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<CurrentUser>();
 
+// Parolni tiklash kodlari xotirada, 10 daqiqa yashaydi.
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<PasswordReset>();
+
 builder.Services.AddSingleton<INotificationChannel, InAppChannel>();
-builder.Services.AddHttpClient<INotificationChannel, TelegramChannel>();
+// Telegram kanali ikki nom bilan ham chaqiriladi: xabar tarqatuvchi uni
+// INotificationChannel deb oladi, parolni tiklash esa to'g'ridan-to'g'ri
+// TelegramChannel deb — chunki unga kod yuborish kerak, xabar emas.
+builder.Services.AddHttpClient<TelegramChannel>();
+builder.Services.AddTransient<INotificationChannel>(sp => sp.GetRequiredService<TelegramChannel>());
 // Bot tinglovchisi: /start bilan foydalanuvchini akkauntga bog'laydi.
 builder.Services.AddHttpClient("telegram-poll");
 builder.Services.AddHostedService<TelegramBotWorker>();
@@ -181,7 +190,43 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
 
+// ── PROKSI ORTIDA ISHLASH ──────────────────────────────────────────
+// Serverda ilova odatda nginx/Caddy ortida turadi. U holda har bir
+// so'rov proksining manzilidan kelgandek ko'rinadi va IP bo'yicha
+// chegara BUTUN KOMPANIYAGA umumiy bo'lib qoladi: bitta odam 10 marta
+// noto'g'ri parol kiritsa, qolganlar bir daqiqa kira olmaydi.
+//
+// Haqiqiy manzil X-Forwarded-For sarlavhasida keladi. Lekin uni
+// har doim ishonchli deb bo'lmaydi: ilova to'g'ridan-to'g'ri
+// internetga chiqarilgan bo'lsa, mijoz o'sha sarlavhani o'zi yozib,
+// chegarani chetlab o'tadi. Shuning uchun sozlama bilan yoqiladi:
+//
+//   Hosting__BehindProxy=true
+//   Hosting__KnownProxies=10.0.0.5,10.0.0.6   (bo'sh bo'lsa — hammasi)
+var behindProxy = builder.Configuration.GetValue<bool>("Hosting:BehindProxy");
+if (behindProxy)
+{
+    builder.Services.Configure<ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        o.ForwardLimit = 1;
+        o.KnownIPNetworks.Clear();
+        o.KnownProxies.Clear();
+
+        var known = builder.Configuration["Hosting:KnownProxies"];
+        if (!string.IsNullOrWhiteSpace(known))
+            foreach (var ip in known.Split(',', StringSplitOptions.RemoveEmptyEntries |
+                                                StringSplitOptions.TrimEntries))
+                if (System.Net.IPAddress.TryParse(ip, out var addr))
+                    o.KnownProxies.Add(addr);
+    });
+}
+
 var app = builder.Build();
+
+// Boshqa hamma narsadan OLDIN: keyingi bosqichlar (chegara, log)
+// haqiqiy manzilni ko'rishi kerak.
+if (behindProxy) app.UseForwardedHeaders();
 
 // ── Xato ishlovchisi: BusinessException → 400 ───────────────────────
 app.UseExceptionHandler(x => x.Run(async ctx =>

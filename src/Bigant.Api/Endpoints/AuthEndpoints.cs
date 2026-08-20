@@ -13,7 +13,18 @@ public static class AuthEndpoints
 {
     public sealed record TelegramLoginRequest(string InitData);
 
-    public sealed record LoginRequest(string Username, string Password);
+    /// <summary>Maydonlar kelmasligi mumkin — shuning uchun ikkalasi ham
+    /// bo'sh bo'lishi mumkin deb e'lon qilingan. Tekshiruv endpoint ichida.</summary>
+    public sealed record LoginRequest(string? Username, string? Password);
+
+    /// <summary>Rahbar boshqa xodimga yangi parol qo'yadi.</summary>
+    public sealed record SetPasswordRequest(string? Next);
+
+    /// <summary>«Parolni unutdim» — Telegramga kod so'rash.</summary>
+    public sealed record ForgotRequest(string? Username);
+
+    /// <summary>Telegramga kelgan kod bilan yangi parol qo'yish.</summary>
+    public sealed record ResetRequest(string? Username, string? Code, string? Next);
     public sealed record CreateUserRequest(string Username, string Password, string FullName,
         UserRole Role, string? TelegramChatId,
         /// <summary>Xodimning Telegram @username'i. Shu yozilsa, xodim botga
@@ -28,6 +39,14 @@ public static class AuthEndpoints
         {
             const int MaxFailed = 5;
             var lockFor = TimeSpan.FromMinutes(15);
+
+            // Login yoki parol umuman kelmasligi mumkin (bo'sh forma, tashqi
+            // vosita, xato so'rov). Ilgari bunday holatda parolni tekshirish
+            // ichki xato (500) berardi — foydalanuvchi «Xato 500» degan
+            // tushunarsiz yozuvni ko'rardi.
+            if (string.IsNullOrEmpty(req.Username) || string.IsNullOrEmpty(req.Password))
+                return Results.Json(new { code = "BAD_CREDENTIALS", message = "Login yoki parol noto'g'ri" },
+                    statusCode: StatusCodes.Status401Unauthorized);
 
             var user = await db.Users.FirstOrDefaultAsync(u => u.Username == req.Username && u.IsActive, ct);
 
@@ -160,8 +179,7 @@ public static class AuthEndpoints
                 throw new BusinessException("NO_USERNAME", "Login kiritilmagan");
             if (string.IsNullOrWhiteSpace(req.FullName))
                 throw new BusinessException("NO_NAME", "F.I.Sh kiritilmagan");
-            if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 8)
-                throw new BusinessException("WEAK_PASSWORD", "Parol kamida 8 belgi bo'lsin");
+            RequireStrong(req.Password);
             if (!Enum.IsDefined(req.Role))
                 throw new BusinessException("BAD_ROLE", "Rol noto'g'ri ko'rsatilgan");
 
@@ -201,5 +219,119 @@ public static class AuthEndpoints
                     hasTelegram = u.TelegramChatId != null
                 }).ToListAsync(ct));
         }).RequireAuthorization();
+
+        // ══════════════════════════════════════════════════════════
+        //  PAROL
+        //
+        //  Ikki yo'l bor:
+        //    1. Rahbar xodimga (yoki o'ziga) yangi parol qo'yadi.
+        //    2. «Parolni unutdim» — Telegramga kod keladi, odam o'zi tiklaydi.
+        //
+        //  Dashboard ICHIDA parol almashtirish ekrani YO'Q va bo'lishi ham
+        //  shart emas: parolini unutgan odam ichkariga umuman kira olmaydi.
+        //  Shuning uchun tiklash faqat kirish ekranida turadi.
+        //  Hammasi tugaganda ham serverga kira oladigan odam uchun
+        //  BIGANT_RESET_PASSWORD o'zgaruvchisi bor (DbSeeder ga qarang).
+        // ══════════════════════════════════════════════════════════
+
+        // ── 2. RAHBAR XODIMGA YANGI PAROL QO'YADI ──
+        g.MapPost("/users/{id:long}/password", async (long id, SetPasswordRequest req, CurrentUser cu,
+                                                      AppDbContext db, IAuditService audit,
+                                                      CancellationToken ct) =>
+        {
+            var actor = await cu.GetAsync(ct);
+            if (actor.Role != UserRole.Admin)
+                throw new BusinessException("FORBIDDEN", "Parol tiklashga huquqingiz yo'q");
+
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct)
+                ?? throw new BusinessException("NOT_FOUND", "Bunday xodim yo'q");
+
+            RequireStrong(req.Next);
+            Apply(user, req.Next!);
+            audit.Write(actor.Id, nameof(AppUser), user.Id, "password-reset",
+                        null, new { user.Username });
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new { message = $"{user.FullName} uchun yangi parol qo'yildi" });
+        }).RequireAuthorization();
+
+        // ── 3a. «PAROLNI UNUTDIM» — TELEGRAMGA KOD ──
+        g.MapPost("/forgot", async (ForgotRequest req, AppDbContext db, PasswordReset reset,
+                                    TelegramChannel tg, ILoggerFactory lf, CancellationToken ct) =>
+        {
+            // Javob HAR DOIM bir xil. Aks holda bu sahifa orqali qaysi login
+            // bor-yo'qligini bilib olish mumkin bo'lardi.
+            var answer = Results.Ok(new
+            {
+                message = "Agar bunday login bo'lsa va unga Telegram ulangan bo'lsa, "
+                        + "kod Telegramga yuborildi. Kod 10 daqiqa amal qiladi."
+            });
+
+            if (string.IsNullOrWhiteSpace(req.Username)) return answer;
+
+            var user = await db.Users.FirstOrDefaultAsync(
+                u => u.Username == req.Username && u.IsActive, ct);
+            if (user?.TelegramChatId is not { Length: > 0 } chatId) return answer;
+
+            var code = reset.Issue(user.Id);
+            var sent = await tg.SendPlainAsync(chatId,
+                "<b>Parolni tiklash</b>\n\n"
+              + $"Kod: <code>{code}</code>\n\n"
+              + "Kod 10 daqiqa amal qiladi. Agar parolni siz so'ramagan bo'lsangiz — "
+              + "bu xabarga e'tibor bermang, parolingiz o'zgarmaydi.", ct);
+
+            if (!sent)
+                lf.CreateLogger("PasswordReset")
+                  .LogWarning("Tiklash kodi Telegramga yetkazilmadi: {User}", user.Username);
+
+            return answer;
+        }).AllowAnonymous().RequireRateLimiting("login");
+
+        // ── 3b. KOD BILAN YANGI PAROL ──
+        g.MapPost("/reset", async (ResetRequest req, AppDbContext db, PasswordReset reset,
+                                   IAuditService audit, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.Username))
+                throw new BusinessException("NO_USERNAME", "Login kiritilmagan");
+
+            var user = await db.Users.FirstOrDefaultAsync(
+                u => u.Username == req.Username && u.IsActive, ct);
+
+            // Login topilmasa ham kodni tekshirgandek javob beramiz.
+            if (user is null || !reset.Verify(user.Id, req.Code))
+                throw new BusinessException("BAD_CODE",
+                    "Kod noto'g'ri yoki muddati o'tgan. Yangi kod so'rang.");
+
+            RequireStrong(req.Next);
+            Apply(user, req.Next!);
+            audit.Write(user.Id, nameof(AppUser), user.Id, "password-reset-telegram", null, null);
+            await db.SaveChangesAsync(ct);
+
+            return Results.Ok(new { message = "Parol yangilandi. Endi kirishingiz mumkin." });
+        }).AllowAnonymous().RequireRateLimiting("login");
+    }
+
+    /// <summary>
+    /// Parol qanchalik ishonchli. Faqat uzunlik yetarli emas — «parolparol»
+    /// ham 10 belgi, lekin bir daqiqada topiladi.
+    /// </summary>
+    private static void RequireStrong(string? p)
+    {
+        if (string.IsNullOrWhiteSpace(p) || p.Length < 8)
+            throw new BusinessException("WEAK_PASSWORD", "Parol kamida 8 belgi bo'lsin");
+        if (!p.Any(char.IsLetter) || !p.Any(char.IsDigit))
+            throw new BusinessException("WEAK_PASSWORD",
+                "Parolda kamida bitta harf va bitta raqam bo'lsin");
+    }
+
+    /// <summary>
+    /// Yangi parolni qo'yadi va hisobni ochadi: parolni unutgan odam
+    /// ko'p urinib blokka tushgan bo'lishi mumkin, endi blok o'rinsiz.
+    /// </summary>
+    private static void Apply(AppUser user, string next)
+    {
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(next);
+        user.FailedLogins = 0;
+        user.LockedUntil = null;
     }
 }

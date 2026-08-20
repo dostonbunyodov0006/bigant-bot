@@ -310,6 +310,36 @@ launchctl load ~/Library/LaunchAgents/uz.bigant.bot.plist
 curl http://127.0.0.1:5080/health
 ```
 
+### Agar oldiga nginx/Caddy qo'yilsa (HTTPS uchun)
+
+Xizmat to'g'ridan-to'g'ri `127.0.0.1` da tursa hech narsa sozlash shart emas.
+Lekin oldiga proksi qo'yilsa — masalan HTTPS kerak bo'lganda — **albatta**
+quyidagini yoqing:
+
+```bash
+Hosting__BehindProxy=true
+Hosting__KnownProxies=127.0.0.1        # bo'sh qoldirilsa har qanday proksiga ishonadi
+```
+
+Sababi: proksi ortida har bir so'rov proksining manzilidan kelgandek
+ko'rinadi. IP bo'yicha chegara (kirish — daqiqasiga 10 ta) o'shanda
+**butun kompaniyaga umumiy** bo'lib qoladi: bitta odam parolni bir necha
+marta xato kiritsa, qolganlar bir daqiqa kira olmaydi.
+
+Nginx uchun yana ikki narsa — `/api/live` uzluksiz oqim (SSE):
+
+```nginx
+location /api/live {
+    proxy_pass http://127.0.0.1:5080;
+    proxy_buffering off;         # bo'lmasa xabar real vaqtda yetib bormaydi
+    proxy_read_timeout 3600s;    # bo'lmasa ulanish uzilib turadi
+}
+```
+
+**Bitta nusxa ishlasin.** Telegram `getUpdates` bitta vaqtda faqat bitta
+mijozga ruxsat beradi: ikkita nusxa ko'tarilsa bot xabarlarni navbat bilan
+o'g'irlaydi va `/start` yo'qolib qoladi.
+
 ### Tekshiruv ro'yxati
 - [ ] `web` qurilgan: `npm run build` → `src/Bigant.Api/wwwroot`
 - [ ] `Jwt__Key` **barqaror** — har qayta ishga tushishda o'zgarsa hamma

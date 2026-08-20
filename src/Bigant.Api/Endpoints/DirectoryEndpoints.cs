@@ -30,7 +30,7 @@ public static class DirectoryEndpoints
     public static void MapDirectoryEndpoints(this WebApplication app)
     {
         // ══════════ BIGANT REKVIZITLARI ══════════
-        var co = app.MapGroup("/api/company").WithTags("Sozlamalar").RequireAuthorization().RequireRateLimiting("api");
+        var co = app.MapGroup("/api/company").WithTags("Sozlamalar").RequireAuthorization().RequireRateLimiting("api").RahbarUchun();
 
         co.MapGet("", async (AppDbContext db, CancellationToken ct) =>
         {
@@ -88,7 +88,7 @@ public static class DirectoryEndpoints
         });
 
         // ══════════ XODIMLAR (doverennost / haydovchi) ══════════
-        var em = app.MapGroup("/api/employees").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api");
+        var em = app.MapGroup("/api/employees").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api").RahbarUchun();
 
         em.MapGet("", async (bool? driversOnly, AppDbContext db, CancellationToken ct) =>
         {
@@ -131,7 +131,7 @@ public static class DirectoryEndpoints
         });
 
         // ══════════ AVTOMOBILLAR (TTN) ══════════
-        var ve = app.MapGroup("/api/vehicles").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api");
+        var ve = app.MapGroup("/api/vehicles").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api").RahbarUchun();
 
         ve.MapGet("", async (AppDbContext db, CancellationToken ct) =>
             Results.Ok(await db.Vehicles.AsNoTracking().Where(v => v.IsActive)
@@ -162,7 +162,7 @@ public static class DirectoryEndpoints
         });
 
         // ══════════ SHARTNOMA SHABLONLARI (Didox Parts[]) ══════════
-        var tp = app.MapGroup("/api/contract-templates").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api");
+        var tp = app.MapGroup("/api/contract-templates").WithTags("Ma'lumotnoma").RequireAuthorization().RequireRateLimiting("api").RahbarUchun();
 
         tp.MapGet("", async (AppDbContext db, CancellationToken ct) =>
             Results.Ok(await db.ContractTemplates.AsNoTracking()

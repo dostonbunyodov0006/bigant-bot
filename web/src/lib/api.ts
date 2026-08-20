@@ -116,21 +116,6 @@ export type StepStatus = 'Pending' | 'Done' | 'Skipped' | 'Failed'
 export type DocType =
   | 'Contract' | 'InvoiceForPayment' | 'Doverennost' | 'Ttn' | 'Esf' | 'Act' | 'Reconciliation'
 
-export interface DealRow {
-  id: number
-  number: string
-  kind: DealKind
-  status: DealStatus
-  counterparty: string
-  manager: string | null
-  amountTotal: number
-  amountPaid: number
-  createdAt: string
-  closedAt: string | null
-  stepsDone: number
-  stepsTotal: number
-}
-
 export interface DealStep {
   step: string
   label: string
@@ -228,24 +213,6 @@ export interface PendingDocs {
   }[]
 }
 
-export interface InboxList {
-  didoxEnabled: boolean
-  count: number
-  items: {
-    id: number
-    type: DocType
-    docNumber: string | null
-    docDate: string
-    status: string
-    sender: string | null
-    deal: string | null
-    dealId: number | null
-    amount: number
-    didoxId: string | null
-    createdAt: string
-  }[]
-}
-
 export interface Notif {
   id: number
   kind: string
@@ -281,13 +248,6 @@ export interface Product {
   mxik: string | null
   vatRate: number
   group: string | null
-}
-
-export interface Readiness {
-  company: { exists: boolean; inn: string | null; ready: boolean }
-  didox: { enabled: boolean; baseUrl: string; hasToken: boolean; hasLogin: boolean }
-  telegram: { enabled: boolean; connected: boolean }
-  counterparties: { total: number; noInn: number; sample: { id: number; name: string }[] }
 }
 
 // ── Formatlash ────────────────────────────────────────────────
