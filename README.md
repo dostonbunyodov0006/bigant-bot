@@ -340,12 +340,93 @@ location /api/live {
 mijozga ruxsat beradi: ikkita nusxa ko'tarilsa bot xabarlarni navbat bilan
 o'g'irlaydi va `/start` yo'qolib qoladi.
 
+### KUNLIK ZAXIRA — majburiy
+
+Bu bazada butun buxgalteriya yotadi. Disk buzilsa yoki noto'g'ri buyruq
+berilsa, zaxirasiz hech narsani qaytarib bo'lmaydi.
+
+`ops/zaxira.sh` shuni qiladi: nusxa oladi, siqadi, **tekshiradi**
+(fayl bo'shmi, arxiv butunmi, ichida `deals` jadvali bormi) va 30 kundan
+eskilarini o'chiradi. Tekshiruvdan o'tmasa fayl `.BUZUQ` deb belgilanadi
+va nol bo'lmagan kod bilan chiqadi — zaxira jimgina buzilib qolmasin.
+
+```bash
+chmod +x ops/zaxira.sh
+PGHOST=localhost PGUSER=postgres PGPASSWORD=... PGDATABASE=bigant \
+  ./ops/zaxira.sh
+```
+
+Sozlamalar: `BIGANT_BACKUP_DIR` (default `~/bigant-zaxira`),
+`BIGANT_KEEP_DAYS` (default 30).
+
+**Xato bo'lganda Telegramga xabar** — `BIGANT_TG_TOKEN` va
+`BIGANT_TG_CHAT` bersangiz, zaxira olinmasa botga ogohlantirish keladi.
+Busiz zaxira oylab ishlamay turishi va buni faqat kerak bo'lganda bilib
+qolish mumkin — eng ko'p uchraydigan xato shu.
+
+#### macOS (Mac mini) — har kuni 02:00 da
+
+`~/Library/LaunchAgents/uz.bigant.zaxira.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>uz.bigant.zaxira</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/USERNAME/bigant/ops/zaxira.sh</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PGHOST</key><string>localhost</string>
+    <key>PGUSER</key><string>postgres</string>
+    <key>PGPASSWORD</key><string>...</string>
+    <key>PGDATABASE</key><string>bigant</string>
+    <key>BIGANT_TG_TOKEN</key><string>...</string>
+    <key>BIGANT_TG_CHAT</key><string>...</string>
+    <key>PATH</key><string>/opt/homebrew/opt/postgresql@18/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+</dict></plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/uz.bigant.zaxira.plist
+launchctl start uz.bigant.zaxira        # darhol sinab ko'ring
+cat ~/bigant-zaxira/zaxira.log
+```
+
+#### Linux — cron
+
+```
+0 2 * * *  PGPASSWORD=... /home/USER/bigant/ops/zaxira.sh
+```
+
+#### Windows — Task Scheduler
+
+Git Bash orqali: `"C:\Program Files\Git\bin\bash.exe" -c "/c/…/ops/zaxira.sh"`
+
+### ZAXIRADAN TIKLASH
+
+```bash
+gzip -dc ~/bigant-zaxira/bigant-2026-08-22_0200.sql.gz | psql -d bigant_yangi
+```
+
+**Tiklashni bir marta HAQIQATDAN sinab ko'ring** — bo'sh bazaga tiklab,
+ma'lumot joyida ekanini tekshiring. Sinalmagan zaxira — zaxira emas,
+faqat xotirjamlik.
+
 ### Tekshiruv ro'yxati
 - [ ] `web` qurilgan: `npm run build` → `src/Bigant.Api/wwwroot`
 - [ ] `Jwt__Key` **barqaror** — har qayta ishga tushishda o'zgarsa hamma
       foydalanuvchi tizimdan chiqib ketadi
 - [ ] `Cors:Origins` bo'sh — dashboard bir xil manbadan
-- [ ] PostgreSQL kunlik backup
+- [ ] Kunlik zaxira ISHLAYAPTI — ops/zaxira.sh jadvalga qo'yilgan va
+      log tekshirilgan; tiklash bir marta haqiqatdan sinab ko'rilgan
 - [ ] `sudo pmset -a sleep 0 disksleep 0` — Mac mini uxlamasin
 - [ ] Tashqi port ochish **shart emas**: xizmat faqat chiquvchi so'rov qiladi
       (Telegram long polling + Didox). `127.0.0.1` ga bog'lash eng xavfsizi.
