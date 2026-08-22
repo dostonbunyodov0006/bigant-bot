@@ -26,4 +26,10 @@ public sealed class DidoxOptions
     public int InboxPollMinutes { get; set; } = 10;
     public int RequestTimeoutSeconds { get; set; } = 60;
     public int MaxSendAttempts { get; set; } = 8;
+
+    /// <summary>
+    /// Bir marta nechta hujjatning holati so'raladi (har 5 daqiqada).
+    /// Didox so'rov chegarasi qo'ysa shu raqamni kamaytiring.
+    /// </summary>
+    public int StatusBatchSize { get; set; } = 200;
 }

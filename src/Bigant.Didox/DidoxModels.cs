@@ -34,6 +34,14 @@ public sealed record DidoxSendResult(
 }
 
 /// <summary>Didox'dan kelgan hujjat (postavshik dogovori, fakturasi va h.k.).</summary>
+/// <summary>
+/// Didox'dan kelgan bitta hujjat.
+///
+/// IKKALA TOMON ham saqlanadi va bu MUHIM: bizga kelgan hujjatda
+/// kontragent — YUBORUVCHI, biz yuborgan hujjatda esa — QABUL QILUVCHI.
+/// Faqat yuboruvchini olsak, biz yuborgan hujjatlarning «kontragenti»
+/// o'zimiz bo'lib chiqardi va butun sotuv tomoni buzilardi.
+/// </summary>
 public sealed record DidoxInboxItem(
     string DidoxId,
     DidoxDocKind Kind,
@@ -44,7 +52,9 @@ public sealed record DidoxInboxItem(
     decimal? Amount,
     decimal? VatAmount,
     string RawJson,
-    DateTimeOffset ReceivedAt
+    DateTimeOffset ReceivedAt,
+    string? ReceiverInn = null,
+    string? ReceiverName = null
 );
 
 public enum DidoxDocState

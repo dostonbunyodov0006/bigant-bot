@@ -6,6 +6,7 @@ using Bigant.Domain.Workflow;
 using Bigant.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Bigant.Infrastructure.Jobs;
 
@@ -29,11 +30,12 @@ public sealed class StatusSyncJob
     private readonly IDidoxClient _didox;
     private readonly INotificationService _notify;
     private readonly ILogger<StatusSyncJob> _log;
+    private readonly DidoxOptions _opt;
 
-    public StatusSyncJob(AppDbContext db, IDidoxClient didox,
-                         INotificationService notify, ILogger<StatusSyncJob> log)
+    public StatusSyncJob(AppDbContext db, IDidoxClient didox, INotificationService notify,
+                         IOptions<DidoxOptions> opt, ILogger<StatusSyncJob> log)
     {
-        _db = db; _didox = didox; _notify = notify; _log = log;
+        _db = db; _didox = didox; _notify = notify; _opt = opt.Value; _log = log;
     }
 
     /// <summary>Yakuniy bo'lmagan holatlar — faqat shular so'raladi.</summary>
@@ -42,13 +44,25 @@ public sealed class StatusSyncJob
 
     public async Task RunAsync(CancellationToken ct = default)
     {
+        // NAVBAT: eng uzoq vaqt tekshirilmagani birinchi keladi.
+        //
+        // Ilgari bu yer «Id bo'yicha birinchi 200 ta» derdi. Navbatda 200 dan
+        // ko'p hujjat bo'lsa, har safar O'SHA 200 tasi so'ralar, qolganlari
+        // esa HECH QACHON tekshirilmasdi — ularning rad etilgani ham bilinmay
+        // qolardi. (Tekshiruv paytida navbatda 270 ta hujjat bor edi.)
+        //
+        // Endi tekshirilgan hujjat vaqt bilan belgilanadi va navbat oxiriga
+        // tushadi — hammasi navbat bilan tekshiriladi.
+        var batch = Math.Clamp(_opt.StatusBatchSize, 10, 500);
+
         var docs = await _db.Documents
             .Include(d => d.Deal).ThenInclude(x => x!.Counterparty)
             .Where(d => d.DidoxId != null
                      && Pending.Contains(d.Status)
                      && d.Deal!.Status == DealStatus.Active)
-            .OrderBy(d => d.Id)
-            .Take(200)
+            .OrderBy(d => d.UpdatedAt)
+            .ThenBy(d => d.Id)
+            .Take(batch)
             .ToListAsync(ct);
 
         if (docs.Count == 0) return;
@@ -68,6 +82,10 @@ public sealed class StatusSyncJob
                 continue;
             }
 
+            // Tekshirildi — navbat oxiriga. Holati o'zgarmagan bo'lsa ham
+            // belgilanadi, aks holda o'sha hujjat navbat boshida qotib qolardi.
+            doc.UpdatedAt = DateTimeOffset.UtcNow;
+
             var next = Map(st.State);
             if (next is null || next == doc.Status) continue;
 
@@ -76,6 +94,9 @@ public sealed class StatusSyncJob
 
             await RaiseAsync(doc, st.RejectReason, ct);
         }
+
+        // Holat o'zgarmagan bo'lsa ham navbat belgisi saqlanishi kerak.
+        await _db.SaveChangesAsync(ct);
 
         if (changed > 0)
         {

@@ -20,11 +20,12 @@ public sealed class InboxJob
     private readonly IInboxService _inbox;
     private readonly INotificationService _notify;
     private readonly ILogger<InboxJob> _log;
+    private readonly DidoxOptions _opt;
 
     public InboxJob(IDidoxClient didox, IInboxService inbox, INotificationService notify,
-                    ILogger<InboxJob> log)
+                    IOptions<DidoxOptions> opt, ILogger<InboxJob> log)
     {
-        _didox = didox; _inbox = inbox; _notify = notify; _log = log;
+        _didox = didox; _inbox = inbox; _notify = notify; _opt = opt.Value; _log = log;
     }
 
     /// <summary>
@@ -34,6 +35,13 @@ public sealed class InboxJob
     /// </summary>
     private const int FailuresBeforeAlarm = 3;
     private static int _consecutiveFailures;
+
+    /// <summary>
+    /// Nechanchi uzilish ekani. Ilgari ogohlantirishning takrorlanmaslik
+    /// kaliti faqat sanadan tuzilardi — natijada bir kunda IKKINCHI uzilish
+    /// bo'lsa xabar JIMGINA yutilardi. Endi har uzilish o'z raqamiga ega.
+    /// </summary>
+    private static int _outageNo;
 
     public async Task RunAsync(CancellationToken ct = default)
     {
@@ -62,6 +70,7 @@ public sealed class InboxJob
 
             if (_consecutiveFailures == FailuresBeforeAlarm)
             {
+                _outageNo++;
                 await _notify.RaiseAsync(new Notification
                 {
                     Kind = NotificationKind.IntegrationDown,
@@ -72,7 +81,7 @@ public sealed class InboxJob
                            $"Xato: {ex.Message}\n\n" +
                            "⚠️ Yangi hujjatlar KELMAYAPTI.\n" +
                            "Didox sozlamalari va internet aloqasini tekshiring.",
-                    DedupKey = $"DidoxDown:{UzTime.Today:yyyy-MM-dd}:{_consecutiveFailures / 20}"
+                    DedupKey = $"DidoxDown:{UzTime.Today:yyyy-MM-dd}:{_outageNo}"
                 }, ct);
                 await _notify.PushPendingAsync(ct);
             }
@@ -89,7 +98,7 @@ public sealed class InboxJob
                 Severity = NotificationSeverity.Info,
                 Title = "✅ DIDOX ALOQASI TIKLANDI",
                 Body = "Didox yana javob bermoqda. Hujjatlar qayta kela boshladi.",
-                DedupKey = $"DidoxUp:{DateTimeOffset.UtcNow:yyyy-MM-dd-HH}"
+                DedupKey = $"DidoxUp:{UzTime.Today:yyyy-MM-dd}:{_outageNo}"
             }, ct);
         }
         _consecutiveFailures = 0;
@@ -100,9 +109,29 @@ public sealed class InboxJob
         {
             try
             {
+                // KONTRAGENT KIM — yo'nalish hal qiladi.
+                //   bizga KELDI   → kontragent yuboruvchi
+                //   biz YUBORDIK  → kontragent qabul qiluvchi
+                // Ikkinchi holatda yuboruvchi BIZ bo'lamiz. Agar shuni
+                // hisobga olmasak, biz yuborgan har bir hujjat o'z
+                // kompaniyamiz nomiga yozilib, sotuv tomoni butunlay
+                // buzilardi: kontragent «BIGANT MChJ», bitim o'zimiz bilan.
+                var cpInn  = dir == DocDirection.In ? i.SenderInn  : i.ReceiverInn;
+                var cpName = dir == DocDirection.In ? i.SenderName : i.ReceiverName;
+
+                // Himoya to'ri: Didox qaysi maydonni bermasin, O'Z INN'imiz
+                // hech qachon kontragent bo'lib qolmasin.
+                if (!string.IsNullOrWhiteSpace(_opt.CompanyInn) && cpInn == _opt.CompanyInn)
+                {
+                    _log.LogWarning(
+                        "Didox hujjatida kontragent sifatida o'z INN'imiz keldi: {Id} №{No}. " +
+                        "Kontragent aniqlanmadi.", i.DidoxId, i.DocNumber);
+                    cpInn = null; cpName = null;
+                }
+
                 var doc = await _inbox.RegisterAsync(new IncomingDocument(
                     MapType(i.Kind), i.DidoxId, i.DocNumber, i.DocDate,
-                    i.SenderInn, i.SenderName, i.Amount ?? 0m, i.VatAmount ?? 0m, i.RawJson,
+                    cpInn, cpName, i.Amount ?? 0m, i.VatAmount ?? 0m, i.RawJson,
                     Direction: dir), ct);
                 if (doc is not null) added++;
             }
@@ -123,12 +152,22 @@ public sealed class InboxJob
         }
     }
 
-    private static DocType MapType(DidoxDocKind k) => k switch
+    /// <summary>
+    /// Didox turini bizning turga o'giradi. Tanimagan turi «Akt» bo'lib
+    /// qoladi — bu jimgina bo'lmasin, logga yozamiz: yangi hujjat turi
+    /// paydo bo'lganini shundan bilamiz.
+    /// </summary>
+    private DocType MapType(DidoxDocKind k)
     {
-        DidoxDocKind.Esf         => DocType.Esf,
-        DidoxDocKind.Ttn         => DocType.Ttn,
-        DidoxDocKind.Doverennost => DocType.Doverennost,
-        DidoxDocKind.Contract    => DocType.Contract,
-        _ => DocType.Act
-    };
+        switch (k)
+        {
+            case DidoxDocKind.Esf:         return DocType.Esf;
+            case DidoxDocKind.Ttn:         return DocType.Ttn;
+            case DidoxDocKind.Doverennost: return DocType.Doverennost;
+            case DidoxDocKind.Contract:    return DocType.Contract;
+            default:
+                _log.LogWarning("Didox: tanilmagan hujjat turi «{Kind}» — «Akt» deb yozildi", k);
+                return DocType.Act;
+        }
+    }
 }

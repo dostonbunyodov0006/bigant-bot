@@ -795,21 +795,33 @@ public sealed class InboxService : IInboxService
 
     private async Task<Counterparty?> ResolveSenderAsync(IncomingDocument inc, CancellationToken ct)
     {
+        // KONTRAGENT KIM BO'LADI — hujjat yo'nalishi hal qiladi.
+        //   bizga KELDI  → u bizga sotmoqchi   → POSTAVSHIK
+        //   biz YUBORDIK → biz unga sotmoqchi  → KLIENT
+        // Ilgari ikkalasi ham «postavshik» deb belgilanardi va mijozlarimiz
+        // postavshiklar ro'yxatiga tushib ketardi.
+        var postavshik = inc.Direction == DocDirection.In;
+
         if (!string.IsNullOrWhiteSpace(inc.SenderInn))
         {
             var found = await _db.Counterparties.FirstOrDefaultAsync(c => c.Inn == inc.SenderInn, ct);
             if (found is not null)
             {
-                if (!found.IsSupplier) { found.IsSupplier = true; await _db.SaveChangesAsync(ct); }
+                // Bir kontragent ikkala rolda ham bo'lishi mumkin — biz undan
+                // olamiz, u bizdan oladi. Shuning uchun belgi qo'shiladi,
+                // almashtirilmaydi.
+                if (postavshik && !found.IsSupplier)  { found.IsSupplier = true; await _db.SaveChangesAsync(ct); }
+                if (!postavshik && !found.IsClient)   { found.IsClient   = true; await _db.SaveChangesAsync(ct); }
                 return found;
             }
 
-            // Yangi postavshik — avtomatik ochamiz, bugalter keyin to'ldiradi.
+            // Yangi kontragent — avtomatik ochamiz, bugalter keyin to'ldiradi.
             var created = new Counterparty
             {
                 Name = inc.SenderName ?? $"INN {inc.SenderInn}",
                 Inn = inc.SenderInn,
-                IsSupplier = true
+                IsSupplier = postavshik,
+                IsClient = !postavshik
             };
             _db.Counterparties.Add(created);
             await _db.SaveChangesAsync(ct);

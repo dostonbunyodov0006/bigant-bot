@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -76,6 +77,37 @@ public sealed class DidoxHttpClient : IDidoxClient
         return req;
     }
 
+    /// <summary>
+    /// So'rovni yuboradi; token eskirgan bo'lsa (401/403) yangisini olib
+    /// BIR MARTA qayta uriniladi.
+    ///
+    /// Busiz jiddiy muammo bo'lardi: token qancha yashashini Didox javobidan
+    /// olamiz, u kelmasa 30 daqiqa deb hisoblaymiz. Haqiqiy muddat qisqaroq
+    /// bo'lsa, har bir so'rov 401 bilan qaytar va tizim «Didox aloqasi uzildi»
+    /// deb yolg'on ogohlantirish yuborardi — aslida faqat token eskirgan.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod m, string url,
+        Func<HttpRequestMessage, HttpRequestMessage>? tayyorla, CancellationToken ct)
+    {
+        var req = await BuildAsync(m, url, ct);
+        if (tayyorla is not null) req = tayyorla(req);
+
+        var resp = await _http.SendAsync(req, ct);
+        if (resp.StatusCode is not (HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden))
+            return resp;
+
+        resp.Dispose();
+        _log.LogInformation("Didox tokeni eskirgan — yangilanmoqda");
+
+        await _authLock.WaitAsync(ct);
+        try { _token = null; _tokenExpiresAt = DateTimeOffset.MinValue; }
+        finally { _authLock.Release(); }
+
+        var qayta = await BuildAsync(m, url, ct);
+        if (tayyorla is not null) qayta = tayyorla(qayta);
+        return await _http.SendAsync(qayta, ct);
+    }
+
     // ── Yuborish ────────────────────────────────────────────────────
     public async Task<DidoxSendResult> SendAsync(
         DidoxOutgoingDocument document, Guid idempotencyKey, CancellationToken ct = default)
@@ -135,8 +167,7 @@ public sealed class DidoxHttpClient : IDidoxClient
     /// <summary>Ikkala ro'yxat ham bir xil shaklda qaytadi — o'qish kodi bitta.</summary>
     private async Task<IReadOnlyList<DidoxInboxItem>> PullListAsync(string path, CancellationToken ct)
     {
-        var req = await BuildAsync(HttpMethod.Get, path, ct);
-        using var resp = await _http.SendAsync(req, ct);
+        using var resp = await SendAsync(HttpMethod.Get, path, null, ct);
         resp.EnsureSuccessStatusCode();
 
         var items = await resp.Content.ReadFromJsonAsync<List<InboxDto>>(Json, ct) ?? [];
@@ -151,13 +182,14 @@ public sealed class DidoxHttpClient : IDidoxClient
             i.Amount,
             i.VatAmount,
             i.Raw ?? "{}",
-            DateTimeOffset.UtcNow)).ToList();
+            DateTimeOffset.UtcNow,
+            i.ReceiverInn,
+            i.ReceiverName)).ToList();
     }
 
     public async Task<DidoxStatus> GetStatusAsync(string didoxId, CancellationToken ct = default)
     {
-        var req = await BuildAsync(HttpMethod.Get, $"v1/documents/{didoxId}/status", ct);
-        using var resp = await _http.SendAsync(req, ct);
+        using var resp = await SendAsync(HttpMethod.Get, $"v1/documents/{didoxId}/status", null, ct);
         if (!resp.IsSuccessStatusCode)
             return new DidoxStatus(didoxId, DidoxDocState.Unknown, null, null);
 
@@ -215,6 +247,10 @@ public sealed class DidoxHttpClient : IDidoxClient
     private sealed record AuthResponse(string Token, int ExpiresInMinutes);
     private sealed record SendResponse(string? DocumentId);
     private sealed record StatusDto(string? Status, string? RejectReason);
+    // TODO(didox): maydon nomlarini rasmiy hujjatdan tasdiqlang.
+    // QABUL QILUVCHI maydoni ham shart: biz yuborgan hujjatda kontragent
+    // o'sha bo'ladi, yuboruvchi esa o'zimiz.
     private sealed record InboxDto(string Id, string? Type, string? Number, string? Date,
-        string? SenderInn, string? SenderName, decimal? Amount, decimal? VatAmount, string? Raw);
+        string? SenderInn, string? SenderName, decimal? Amount, decimal? VatAmount, string? Raw,
+        string? ReceiverInn = null, string? ReceiverName = null);
 }
